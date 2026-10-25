@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- Mirrors the real EpikChat "Go live" DOM (inspected 2026-10-25): React portal dialog at the end of <body>,
+     hidden emoji-picker dialog, aria-pressed option buttons, same dialog relabelled for the audience step
+     (no second Continue), then a "Connect your encoder" dialog. Handlers are attached via addEventListener
+     and react asynchronously, like React state updates. FAKE key only. -->
+<html><head><title>mock</title><style>
+.fixed{position:fixed}.inset-0{inset:0}.z-50{z-index:50} [role=dialog]{background:#fff;margin:40px auto;width:480px;padding:12px}
+button{padding:4px 8px;margin:2px}
+</style></head><body>
+<header><a href="/chat">EpikChat</a> <button type="button" id="golive"><svg aria-hidden="true" width="10" height="10"></svg><span>Go live</span></button></header>
+<main><div class="chat">chat messages… <button type="button">Go live tips</button></div></main>
+<div role="dialog" aria-hidden="true" aria-label="Emoji picker" style="position:absolute;left:-9999px;width:300px;height:200px"><button type="button">Continue</button><button type="button">😀</button></div>
+<script>
+const later = f => setTimeout(f, 150 + Math.random() * 250);
+const SRC = [['Camera & microphone','Go live from this browser',true],['Share your screen','A tab, window, or desktop',false],['RTMP encoder','OBS and streaming software',false]];
+let portal = null;
+function opt(t1, t2, pressed){ const b = document.createElement('button'); b.type='button'; b.setAttribute('aria-pressed', String(pressed));
+  b.innerHTML = '<span class="icon" aria-hidden="true">◎</span><span>'+t1+'</span><span>'+t2+'</span>'; return b; }
+function openDialog(){
+  if (portal) return;
+  portal = document.createElement('div'); portal.className = 'fixed inset-0 z-50';
+  const d = document.createElement('div'); d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true'); d.setAttribute('aria-label','What do you want to stream?');
+  portal.appendChild(d); document.body.appendChild(portal); renderSource(d);
+}
+function renderSource(d){
+  d.innerHTML = '<h2>What do you want to stream?</h2>';
+  const g = document.createElement('div'); g.setAttribute('role','group'); g.setAttribute('aria-label','Stream source');
+  SRC.forEach(([a,b,p]) => { const o = opt(a,b,p); o.addEventListener('click', () => later(() => { g.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed','false')); o.setAttribute('aria-pressed','true'); })); g.appendChild(o); });
+  d.appendChild(g);
+  const f = document.createElement('div');
+  const c = document.createElement('button'); c.type='button'; c.textContent='Cancel'; c.addEventListener('click', () => { portal.remove(); portal = null; });
+  const n = document.createElement('button'); n.type='button'; n.className='bg-blue-600 text-white'; n.innerHTML='Continue<svg aria-hidden="true" width="8" height="8"></svg>';
+  n.addEventListener('click', () => later(() => { const sel = [...g.querySelectorAll('button')].find(x => x.getAttribute('aria-pressed') === 'true'); window.__chosen = sel.textContent; renderAudience(d); }));
+  f.append(c, n); d.appendChild(f);
+}
+function renderAudience(d){
+  d.setAttribute('aria-label','Choose your audience');
+  d.innerHTML = '<h2>Choose your audience</h2>';
+  const opts = [opt('Public','Anyone can watch',true), opt('Private','Request to watch',false)];
+  opts.forEach(o => { o.addEventListener('click', () => later(() => { opts.forEach(x => x.setAttribute('aria-pressed','false')); o.setAttribute('aria-pressed','true'); })); d.appendChild(o); });
+  const h = document.createElement('h3'); h.textContent = 'Ready to go live'; d.appendChild(h);
+  const f = document.createElement('div');
+  const back = document.createElement('button'); back.type='button'; back.textContent='Back'; back.addEventListener('click', () => later(() => { d.setAttribute('aria-label','What do you want to stream?'); renderSource(d); }));
+  const cr = document.createElement('button'); cr.type='button'; cr.className='bg-emerald-600 text-white'; cr.textContent='Create live stream';
+  cr.addEventListener('click', () => { window.__audience = opts.find(x => x.getAttribute('aria-pressed') === 'true').textContent; window.__creates = (window.__creates||0) + 1; setTimeout(renderEncoder, 900); });
+  f.append(back, cr); d.appendChild(f);
+}
+function renderEncoder(){
+  portal.innerHTML = '';
+  const d = document.createElement('div'); d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true'); d.setAttribute('aria-label','Connect your encoder');
+  d.innerHTML = '<h2>Connect your encoder</h2><p>Your encoder connects next</p>' +
+    '<label>Server URL</label><div><input readonly value="rtmp://media.epikchat.com:1935/x"><button type="button" aria-label="Copy server URL">⧉</button></div>' +
+    '<label>Stream key</label><div><span class="key">••••••••••••</span><button type="button" id="show">Show stream key</button><button type="button" aria-label="Copy stream key">⧉</button></div>';
+  portal.appendChild(d);
+  d.querySelector('#show').addEventListener('click', () => later(() => { d.querySelector('.key').outerHTML = '<code class="key">FAKE_mock_Key_12345abc</code>'; }));
+}
+document.getElementById('golive').addEventListener('click', () => later(openDialog));
+</script>
+<script src="helper.js"></script>
+<script>
+// Same loop as SignInWindow.RunAutomation: poll __epik.step every 500 ms until "done" or timeout.
+(async () => {
+  const STEPS = window.__STEPS; const log = [];
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let ok = true;
+  for (const s of STEPS) {
+    const end = Date.now() + s.TimeoutSec * 1000; let r;
+    while (Date.now() < end) { r = window.__epik.step(s.Id, s.Arg); const l = s.Id + ': ' + r.state + ' (' + r.info + ') dialog=' + r.dialog;
+      if (log[log.length - 1] !== l) log.push(l); if (r.state === 'done') break; await sleep(500); }
+    if (r.state !== 'done' && !s.Optional) { ok = false; break; }
+  }
+  let key = {};
+  for (let i = 0; i < 20 && ok; i++) { key = window.__epik.read(); if (key.key) break; await sleep(500); }
+  document.title = JSON.stringify({ ok, chosen: window.__chosen, audience: window.__audience, creates: window.__creates, key, log });
+})();
+</script>
+</body></html>

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.1 — 2026-10-25
+### Fixed
+- "Sign in to EpikChat & get stream key" no longer gets stuck at "Continue". The automation now follows EpikChat's real Go-live dialog:
+  - picks the open modal by `aria-modal`/`aria-label` and visibility (ignoring the hidden emoji-picker dialog);
+  - selects **RTMP encoder** in the *Stream source* group and waits for `aria-pressed="true"`;
+  - clicks **Continue**, then follows the same dialog as it becomes *Choose your audience* (there is no second Continue);
+  - picks Public/Private, clicks **Create live stream** (once), then reads the server and key from the *Connect your encoder* dialog after **Show stream key**.
+- Clicks use a full pointer/mouse event sequence. Each step polls until its result is visible.
+- Every step's status, including the dialog currently seen, is shown in the window and written to `%LOCALAPPDATA%\EpikStreamer\signin.log`.
+- Reading the key is more robust: inputs, `code`/`pre`/`kbd`, copy-button data attributes, labelled text, and full `rtmp://…/x/KEY` URLs.
+### Added
+- Mock EpikChat page mirroring the real DOM (`EpikStreamer.Tests/mock`) with a headless-Chrome check (`run-mock.sh`).
+
 ## 2.1.0 — 2026-10-25
 ### Added
 - Crossfade transitions between playlist items (`xfade` + `acrossfade`), 0–5 s, 16 styles. Seamless across loop, shuffle, skip and reconnect.

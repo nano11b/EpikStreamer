@@ -1,4 +1,4 @@
-# EpikStreamer 2.1
+# EpikStreamer 2.1.1
 
 Windows desktop app (WPF, .NET 8) that streams local video files to RTMP ingests such as EpikChat's
 **Go live → RTMP encoder** (server `rtmp://media.epikchat.com:1935/x` + your stream key) using ffmpeg.
@@ -7,9 +7,9 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 ## Downloads (GitHub Releases: https://github.com/nano11b/EpikStreamer/releases)
 | Package | Contents |
 |---|---|
-| `EpikStreamer-2.1.0-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
-| `EpikStreamer-v2.1-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
-| `EpikStreamer-v2.1-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
+| `EpikStreamer-2.1.1-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
+| `EpikStreamer-v2.1.1-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
+| `EpikStreamer-v2.1.1-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
 
 ## Features
 - **Playlist** (Source / Playlist tab): add/drag-drop MP4/MKV/MOV/AVI/WebM…, remove, reorder, loop the whole playlist, shuffle, **⏭ Next** to skip.
@@ -53,16 +53,16 @@ From the release it reads `update.json` (`{"version","url","sha256","notes"}`), 
 If the version is newer, the app shows the notes and asks you first. Then it downloads the installer over HTTPS, **verifies the SHA-256** (and deletes the file on a mismatch), and asks again before closing and running the installer silently. The installer relaunches the app afterwards.
 You can also point the URL at your own `update.json` (HTTPS only). See `installer/update.example.json`.
 
-## Sign in to EpikChat & get stream key  ⚠ untested against the live site
+## Sign in to EpikChat & get stream key
 On Output / Encoder, click **Sign in to EpikChat & get stream key**. A window shows EpikChat's real login page (Microsoft Edge WebView2), and you sign in yourself, so EpikStreamer never sees or stores your password.
 The browser session is kept in `%LOCALAPPDATA%\EpikStreamer\WebView2`, so next time you're usually already signed in. Then click **I'm signed in – get stream key**, and the app drives EpikChat's normal pages for you:
-open `/chat` → dismiss first-visit popups → **Go live** → **RTMP encoder (OBS and streaming software)** → Continue → audience **Public**/**Private** (the *Audience* setting) → Continue → **Create live stream** → **Show stream key**.
+open `/chat` → dismiss first-visit popups → **Go live** → **RTMP encoder (OBS and streaming software)** → Continue → audience **Public**/**Private** (the *Audience* setting, same dialog, no second Continue) → **Create live stream** → **Show stream key**.
 It then reads the server URL (expected `rtmp://media.epikchat.com:1935/x`) and the key from the page and fills them into the current profile. Each step is shown in the window. If a step can't be found, it tells you which one. You can finish that step by hand in the page and click **Read key from page**.
 - All page labels/selectors are text-based and live in one file: `EpikChatAutomation.cs`. Edit the patterns there if EpikChat renames a button.
 - EpikChat allows **one chat session per account** and **limits logins per IP**. Opening the chat in the app may take over (disconnect) a chat session open elsewhere, and the app warns before doing this. The chat panel reuses the same session (see below).
 - **Sign out** (in the window or next to the button) clears the WebView2 profile.
 - Requires the Microsoft Edge **WebView2 Runtime**, which ships with Windows 10 and 11 (otherwise: https://go.microsoft.com/fwlink/p/?LinkId=2124703).
-- This flow was written without access to the live site and has only been tested against a mock page, so expect to adjust the patterns.
+- The steps follow EpikChat's real Go-live dialog (DOM inspected Oct 2026), verified against a mock page with the same structure (`EpikStreamer.Tests/mock`). Each step and the dialog it sees are logged to `%LOCALAPPDATA%\EpikStreamer\signin.log`.
 
 ## How it works
 For each playlist item, a "feeder" ffmpeg renders the item (scaled/padded to WxH, target fps, 48 kHz PCM) as MPEG-TS faster than real time, stamped with its exact position on the stream timeline.

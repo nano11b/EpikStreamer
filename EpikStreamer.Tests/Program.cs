@@ -20,6 +20,8 @@ Profile MakeProfile()
     return p;
 }
 
+if (mode == "helperjs") { Console.Write(EpikStreamer.EpikChatAutomation.HelperJs); return 0; }
+if (mode == "steps") { Console.Write(System.Text.Json.JsonSerializer.Serialize(EpikStreamer.EpikChatAutomation.Steps(args.Length > 1 ? args[1] : "Public"))); return 0; }
 if (mode == "chatjs") { Console.Write(EpikStreamer.EpikChatAutomation.ObserverJs(true)); return 0; }
 if (mode == "args")
 {

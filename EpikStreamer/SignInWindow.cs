@@ -52,6 +52,13 @@ public class SignInWindow : Window
     void Status(string s, bool error = false)
     {
         _status.Text = s;
+        try   // step-by-step trace for debugging the page automation (never contains the key: it is masked below)
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EpikStreamer");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "signin.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {(error ? "ERR " : "")}{s}{Environment.NewLine}");
+        }
+        catch { }
         _status.Foreground = error ? Brushes.OrangeRed : (Brush)FindResource("Fg");
     }
 
@@ -131,16 +138,29 @@ public class SignInWindow : Window
             for (int i = 0; i < steps.Length; i++)
             {
                 var s = steps[i];
-                Status($"Step {i + 1}/{steps.Length}: {s.Name}…");
-                if (!await TryClick(s.Patterns, s.TimeoutSec))
+                string tag = $"Step {i + 1}/{steps.Length}: {s.Name}";
+                Status(tag + "…");
+                var end = DateTime.UtcNow.AddSeconds(s.TimeoutSec);
+                string state = "", info = "", dlg = "", lastShown = "";
+                while (DateTime.UtcNow < end)
+                {
+                    await EnsureHelper();
+                    var r = await Js($"window.__epik.step({JsonSerializer.Serialize(s.Id)}, {JsonSerializer.Serialize(s.Arg)})");
+                    if (r.ValueKind != JsonValueKind.Object) { await Task.Delay(500); continue; }
+                    state = r.GetProperty("state").GetString() ?? ""; info = r.GetProperty("info").GetString() ?? ""; dlg = r.GetProperty("dialog").GetString() ?? "";
+                    var line = $"{tag}: {state}{(info.Length > 0 ? " (" + info + ")" : "")} · dialog: {(dlg.Length > 0 ? "\"" + dlg + "\"" : "none")}";
+                    if (line != lastShown) { Status(line); lastShown = line; }
+                    if (state == "done") break;
+                    await Task.Delay(500);
+                }
+                if (state != "done")
                 {
                     if (s.Optional) continue;
-                    Status($"Step {i + 1}/{steps.Length} failed: couldn't find \"{s.Name}\" on the page. You can finish the steps manually in the page, then click \"get stream key\" again (it will read the key from the page). " +
-                           "If EpikChat changed its labels, update EpikChatAutomation.cs.", true);
+                    Status($"{tag} failed: {state} {info} (dialog seen: {(dlg.Length > 0 ? dlg : "none")}). Finish the remaining steps by hand in the page, then click \"Read key from page\". " +
+                           "If EpikChat changed its page, update EpikChatAutomation.cs.", true);
                     _getKey.Content = "Read key from page"; _manual = true;
                     return;
                 }
-                await Task.Delay(1200);
             }
             await ReadKey();
         }
@@ -167,7 +187,7 @@ public class SignInWindow : Window
                 DialogResult = true;
                 return;
             }
-            if (i == 3) await TryClick(new[] { "show stream key", "^show$", "reveal" }, 2);
+            if (i % 4 == 3) await Js("window.__epik.step('showkey', '')");
             await Task.Delay(1000);
         }
         Status("Couldn't find the stream key on the page. Make sure the RTMP stream was created and the key is shown (click \"Show stream key\"), then try again.", true);
