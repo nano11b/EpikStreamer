@@ -47,6 +47,7 @@ public partial class MainWindow : Window
         LoadProfile(_cur);
         UpdateFfmpegStatus();
         _previewTimer.Tick += (_, _) => RefreshPreview();
+        Init22();
     }
 
     // ---------- profile <-> UI ----------
@@ -84,6 +85,7 @@ public partial class MainWindow : Window
         TxtCorner.SelectedItem = o.TextCorner; TxtBox.IsChecked = o.TextBackground; TxtTicker.IsChecked = o.Ticker; TxtSpeed.Text = o.TickerSpeed.ToString();
         FontPath.Text = o.FontFile;
         ClkEnable.IsChecked = o.ClockEnabled; ClkFormat.Text = o.ClockFormat; ClkSize.Text = o.ClockFontSize.ToString(); ClkCorner.SelectedItem = o.ClockCorner;
+        LoadAudio(p);
         _loading = false;
     }
 
@@ -114,6 +116,7 @@ public partial class MainWindow : Window
         o.Ticker = TxtTicker.IsChecked == true; o.TickerSpeed = Int(TxtSpeed.Text, 120, 10, 5000); o.FontFile = FontPath.Text.Trim();
         o.ClockEnabled = ClkEnable.IsChecked == true; o.ClockFormat = ClkFormat.Text; o.ClockFontSize = Int(ClkSize.Text, 28, 6, 400);
         o.ClockCorner = (Corner)(ClkCorner.SelectedItem ?? Corner.TopLeft);
+        SaveAudio(p);
     }
 
     void Persist()
@@ -123,6 +126,7 @@ public partial class MainWindow : Window
         _store.CheckUpdatesOnStartup = CheckOnStartupCheck.IsChecked == true;
         _store.ProtectedGitHubToken = GhTokenBox.Password.Length > 0 ? Secret.Protect(GhTokenBox.Password) : null;
         _store.ChatPanelVisible = ChatToggle.IsChecked == true; _store.ChatCompact = _chat.Compact;
+        SaveAppSettings();
         try { _store.Active = _cur.Name; _store.Save(); } catch (Exception ex) { Log("Could not save profiles: " + ex.Message); }
     }
 
@@ -283,45 +287,63 @@ public partial class MainWindow : Window
     // ---------- streaming ----------
     async void Start_Click(object sender, RoutedEventArgs e)
     {
+        if (_engine?.IsRunning == true) return;
         SaveUiTo(_cur);
         var p = _cur;
-        if (p.Playlist.Count == 0) { MessageBox.Show(this, "Add at least one video to the playlist."); Tabs.SelectedIndex = 0; return; }
+        var playlistOverride = _playlistOverride; _playlistOverride = null;
+        if (playlistOverride != null) { p = p.Clone(p.Name); p.Playlist = playlistOverride; }
+        if (p.Playlist.Count == 0) { Warn("Add at least one video to the playlist."); Tabs.SelectedIndex = 0; return; }
         var missing = p.Playlist.Where(f => !File.Exists(f)).ToList();
-        if (missing.Count == p.Playlist.Count) { MessageBox.Show(this, "None of the playlist files exist."); return; }
+        if (missing.Count == p.Playlist.Count) { Warn("None of the playlist files exist."); return; }
         var dests = new List<CommandBuilder.Destination>(); var secrets = new List<string>(); var destNames = new List<string>();
         foreach (var o2 in p.Outputs.Where(x => x.Enabled))
         {
             if (!System.Text.RegularExpressions.Regex.IsMatch(o2.ServerUrl, "^rtmps?://", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-            { MessageBox.Show(this, $"Output \"{o2.Name}\": server URL must start with rtmp:// or rtmps://"); Tabs.SelectedIndex = 2; RefreshOutputs(o2); return; }
+            { Warn($"Output \"{o2.Name}\": server URL must start with rtmp:// or rtmps://"); Tabs.SelectedIndex = 2; RefreshOutputs(o2); return; }
             var k = _keys.GetValueOrDefault(o2, "").Trim();
-            if (k.Length == 0 && o2.Preset != "Custom") { MessageBox.Show(this, $"Enter the stream key for \"{o2.Name}\"."); Tabs.SelectedIndex = 2; RefreshOutputs(o2); return; }
+            if (k.Length == 0 && o2.Preset != "Custom") { Warn($"Enter the stream key for \"{o2.Name}\"."); Tabs.SelectedIndex = 2; RefreshOutputs(o2); return; }
             dests.Add(new CommandBuilder.Destination(o2.Name, CommandBuilder.JoinUrl(o2.ServerUrl, k))); destNames.Add(o2.Name);
             if (k.Length > 0) secrets.Add(k);
         }
-        if (dests.Count == 0 && !p.RecordEnabled) { MessageBox.Show(this, "Enable at least one output (or turn on recording)."); Tabs.SelectedIndex = 2; return; }
-        if (p.Overlays.ImageEnabled && !File.Exists(p.Overlays.ImagePath)) { MessageBox.Show(this, "Overlay image not found."); Tabs.SelectedIndex = 1; return; }
+        if (dests.Count == 0 && !p.RecordEnabled) { Warn("Enable at least one output (or turn on recording)."); Tabs.SelectedIndex = 2; return; }
+        if (p.Overlays.ImageEnabled && !File.Exists(p.Overlays.ImagePath)) { Warn("Overlay image not found."); Tabs.SelectedIndex = 1; return; }
         var ff = await RequireFfmpeg(); if (ff == null) return;
         Persist();
 
         var run = p.Clone(p.Name); // snapshot, so UI edits don't affect the running stream
+        var chatCfg = _store.Chat;
         try
         {
             _engine = new StreamEngine(run, ff, dests, secrets);
+            _engine.TextOverlays = (chatCfg.CommandsEnabled && chatCfg.ShowOnStream) || chatCfg.AlertsEnabled;
+            _engine.SetMusicMuted(_musicMuted); _engine.SetMicMuted(_micMuted); _engine.SetOverlaysHidden(_overlaysHidden);
+            BeginSession(run, destNames);
             _destStatus.Clear(); for (int i = 0; i < destNames.Count; i++) _destStatus[i] = (destNames[i], DestState.Connecting, "");
             if (run.RecordEnabled) _destStatus[-1] = ("Recording", DestState.Live, "");
             RenderDests();
             _engine.DestinationStatus += (i, st, msg) => Dispatcher.BeginInvoke(() => { if (_destStatus.TryGetValue(i, out var d)) { _destStatus[i] = (d.Name, st, msg); RenderDests(); } });
             _engine.Log += Log;
-            _engine.State += st => Dispatcher.BeginInvoke(() => StatusText.Text = st);
+            _engine.State += st => Dispatcher.BeginInvoke(() => { StatusText.Text = st; OnEngineState(st); });
             _engine.Stats += st => Dispatcher.BeginInvoke(() => ShowStats(st));
             _engine.Finished += () => Dispatcher.BeginInvoke(OnFinished);
             _bitrates.Clear(); DrawGraph(); PreviewImg.Source = null; _lastPreviewWrite = default;
             _engine.Start();
         }
-        catch (Exception ex) { MessageBox.Show(this, "Could not start: " + ex.Message); _engine = null; return; }
+        catch (Exception ex) { Warn("Could not start: " + ex.Message); _engine = null; _session = null; return; }
         StartBtn.IsEnabled = false; StopBtn.IsEnabled = true; SkipBtn.IsEnabled = true;
         StatusText.Text = "Connecting…"; Tabs.SelectedItem = StatsTab;
         _previewTimer.Start();
+        Notify("Stream starting", $"{run.Name}: {string.Join(", ", destNames.DefaultIfEmpty("recording only"))}");
+        UpdateControls();
+    }
+
+    string _lastState = "";
+    void OnEngineState(string st)
+    {
+        if (st.StartsWith("Reconnecting in") && !_lastState.StartsWith("Reconnecting")) Notify("Connection lost", st, true);
+        else if (st.StartsWith("Live") && _lastState.StartsWith("Reconnecting")) Notify("Reconnected", st);
+        else if (st.StartsWith("Error") || st.StartsWith("Failed")) Notify("Stream error", st, true);
+        _lastState = st; UpdateControls();
     }
 
     void OnFinished()
@@ -330,6 +352,10 @@ public partial class MainWindow : Window
         if (_destStatus.ContainsKey(-1)) { _destStatus[-1] = ("Recording", DestState.Stopped, ""); RenderDests(); }
         _previewTimer.Stop();
         StartBtn.IsEnabled = true; StopBtn.IsEnabled = false; SkipBtn.IsEnabled = false;
+        var reason = string.IsNullOrEmpty(_lastState) ? "Stopped" : _lastState;
+        EndSession(reason); _runningSchedule = null;
+        Notify("Stream ended", reason, reason.StartsWith("Error") || reason.StartsWith("Failed"));
+        _lastState = ""; UpdateControls();
     }
 
     void Skip_Click(object s, RoutedEventArgs e) => _engine?.Skip();
@@ -344,6 +370,7 @@ public partial class MainWindow : Window
 
     void ShowStats(StreamStats s)
     {
+        _lastStats = s; _session?.OnStats(s);
         SFps.Text = s.Fps.ToString("0.0", Inv);
         SBitrate.Text = s.BitrateKbps > 0 ? $"{s.BitrateKbps:0} kbps" : "–";
         SSpeed.Text = s.Speed > 0 ? s.Speed.ToString("0.00x", Inv) : "–";
@@ -354,6 +381,7 @@ public partial class MainWindow : Window
         SItem.Text = $"{s.ItemIndex + 1} / {s.ItemCount}";
         SItemName.Text = $"{s.ItemName}  @ {TimeSpan.FromSeconds(s.ItemPosition):hh\\:mm\\:ss}";
         if (s.BitrateKbps > 0) { _bitrates.Add(s.BitrateKbps); if (_bitrates.Count > 120) _bitrates.RemoveAt(0); DrawGraph(); }
+        UpdateControls();
     }
 
     void Graph_SizeChanged(object s, SizeChangedEventArgs e) => DrawGraph();
@@ -406,6 +434,7 @@ public partial class MainWindow : Window
     async void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_closing) return;
+        if (HideInsteadOfClose()) { e.Cancel = true; return; }
         Persist();
         if (_engine?.IsRunning == true) { e.Cancel = true; _closing = true; await StopEngine(); Close(); }
     }
@@ -506,8 +535,9 @@ public partial class MainWindow : Window
     void ShowChatStatus(int? viewers, bool live)
     {
         SViewers.Text = viewers?.ToString() ?? "–";
+        OnViewerCount(viewers);
         SLive.Text = ChatToggle.IsChecked != true ? "–" : live ? "🔴 LIVE" : "offline";
-        Title = "EpikStreamer 2.1.1" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
+        Title = "EpikStreamer 2.2.0" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
     }
 
     // ---------- updates ----------
@@ -550,7 +580,7 @@ static class Prompt
         var w = new Window
         {
             Title = title, Owner = owner, Width = 380, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)owner.FindResource("Bg"),
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)owner.FindResource("Bg"), Foreground = (Brush)owner.FindResource("Fg"),
         };
         var tb = new TextBox { Text = initial, Margin = new Thickness(0, 0, 0, 10) };
         var ok = new Button { Content = "OK", IsDefault = true, Width = 80 };

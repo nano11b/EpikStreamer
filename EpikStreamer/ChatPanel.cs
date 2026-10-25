@@ -15,8 +15,11 @@ namespace EpikStreamer;
 public class ChatPanel : DockPanel
 {
     public event Action<int?, bool>? StatusChanged;   // viewers (null = unknown), live
+    public event Action<Core.ChatMessage>? MessageReceived;  // v2.2: new chat messages (selectors UNTESTED)
+    public bool IsLoaded2 => _initialized && _wantVisible && !WebViewHost.IsSignInOpen;
     readonly WebView2 _web = new();
     readonly TextBlock _note = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8), Foreground = Brushes.Gray };
+    // note: the panel inherits theme brushes from the window
     readonly CheckBox _compact = new() { Content = "Compact", Margin = new Thickness(6, 4, 6, 4) };
     string? _scriptId;
     bool _initialized, _wantVisible;
@@ -90,7 +93,16 @@ public class ChatPanel : DockPanel
         {
             using var d = JsonDocument.Parse(e.WebMessageAsJson);
             var r = d.RootElement;
-            if (r.GetProperty("type").GetString() != "epik-status") return;
+            var type = r.GetProperty("type").GetString();
+            if (type == "epik-chat")
+            {
+                var text = r.TryGetProperty("text", out var tx) ? tx.GetString() ?? "" : "";
+                var user = r.TryGetProperty("user", out var us) ? us.GetString() ?? "" : "";
+                var id = r.TryGetProperty("id", out var mid) ? mid.GetString() : null;
+                if (text.Length > 0) MessageReceived?.Invoke(new Core.ChatMessage(user, text, id));
+                return;
+            }
+            if (type != "epik-status") return;
             int? viewers = r.TryGetProperty("viewers", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
             bool live = r.TryGetProperty("live", out var l) && l.ValueKind == JsonValueKind.True;
             StatusChanged?.Invoke(viewers, live);
@@ -103,6 +115,14 @@ public class ChatPanel : DockPanel
         if (!_initialized) return;
         if (open) { _web.CoreWebView2.Navigate("about:blank"); _note.Text = "Chat is paused while the sign-in window is open (EpikChat allows one session)."; StatusChanged?.Invoke(null, false); }
         else if (_wantVisible) _ = SetActive(true);
+    }
+
+    /// <summary>Opt-in ("Reply in chat", off by default): types <paramref name="text"/> into EpikChat's normal chat box as the signed-in user.</summary>
+    public async Task<string> SendChat(string text)
+    {
+        if (!IsLoaded2) return "chat not open";
+        try { return await _web.CoreWebView2.ExecuteScriptAsync("window.__epikSend ? window.__epikSend(" + JsonSerializer.Serialize(text) + ") : 'no-helper'"); }
+        catch (Exception ex) { return ex.Message; }
     }
 
     /// <summary>Sign out: clears cookies/storage of the shared profile (works while the environment is in use).</summary>

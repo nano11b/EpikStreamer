@@ -9,6 +9,63 @@ public static class CommandBuilder
 {
     static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     public const string FontName = "font.ttf", TextFile = "overlay_text.txt", ClockFile = "clock.txt", PreviewFile = "preview.jpg";
+    public const string AlertFile = "alert.txt", ChatFile = "chat_overlay.txt";
+
+    /// <summary>v2.2 live features of one encoder run. ControlPort 0 = no runtime control (azmq).</summary>
+    public record LiveOptions(int ControlPort = 0, int MusicPort = 0, string? MicDevice = null, bool TextOverlays = false,
+                              double MusicVolume = 0.25, double MicVolume = 1.0, double MainVolume = 1.0);
+
+    /// <summary>Input args for the mic. "lavfi:&lt;graph&gt;" is a test hook; anything else is a dshow device name.</summary>
+    public static List<string> MicInputArgs(string device) => device.StartsWith("lavfi:", StringComparison.Ordinal)
+        ? new() { "-f", "lavfi", "-i", device[6..] }
+        : new() { "-f", "dshow", "-audio_buffer_size", "50", "-i", "audio=" + device };
+
+    /// <summary>Input args for the music feed: raw PCM the engine pushes over a local TCP socket.</summary>
+    public static List<string> MusicInputArgs(int port) => new()
+        { "-thread_queue_size", "64", "-f", "s16le", "-ar", "48000", "-ac", "2", "-i", $"tcp://127.0.0.1:{port}?listen=1&listen_timeout=20000" };
+
+    /// <summary>Feeder for one music file: decode → raw s16le 48k stereo on stdout, unthrottled (TCP backpressure paces it).</summary>
+    public static List<string> MusicFeederArgs(string file) => new()
+        { "-hide_banner", "-loglevel", "error", "-nostdin", "-i", file, "-vn", "-sn", "-dn", "-af", "aresample=48000", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1" };
+
+    static string V(double v) => v.ToString("0.###", Inv);
+
+    /// <summary>Audio chain: main [+ mic] → (sidechain) → [+ music, ducked] → normalization → 44.1k.</summary>
+    public static List<string> AudioGraph(Profile p, LiveOptions? lo, int musicIdx, int micIdx)
+    {
+        var a = p.Audio; var f = new List<string>();
+        var zmq = lo is { ControlPort: > 0 } ? $"azmq=bind_address=tcp\\\\://127.0.0.1\\\\:{lo.ControlPort}," : "";
+        double mainVol = lo?.MainVolume ?? a.MainVolume;
+        f.Add($"[0:a]{zmq}asetpts=PTS-STARTPTS,aresample=48000:async=1000:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,volume@main={V(mainVol)}[am]");
+        string voice = "[am]";
+        if (micIdx >= 0)
+        {
+            var gate = a.MicNoiseGate ? $"agate@gate=threshold={V(Math.Clamp(a.GateThreshold, 0.0001, 1))}:ratio=4:attack=5:release=200," : "";
+            f.Add($"[{micIdx}:a]aresample=48000:async=1000,aformat=sample_fmts=fltp:channel_layouts=stereo,{gate}volume@mic={V(lo?.MicVolume ?? a.MicVolume)}[amic]");
+            f.Add("[am][amic]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[avo]"); voice = "[avo]";
+        }
+        string mix = voice;
+        if (musicIdx >= 0)
+        {
+            f.Add($"[{musicIdx}:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume@music={V(lo?.MusicVolume ?? a.MusicVolume)}[amu]");
+            string mu = "[amu]";
+            if (a.Ducking)
+            {
+                f.Add($"{voice}asplit=2[avm][asc]"); voice = "[avm]";
+                f.Add($"[amu][asc]sidechaincompress@duck=threshold={V(Math.Clamp(a.DuckThreshold, 0.001, 1))}:ratio={V(Math.Clamp(a.DuckRatio, 1, 20))}:attack=20:release=500[amd]"); mu = "[amd]";
+            }
+            f.Add($"{voice}{mu}amix=inputs=2:duration=first:normalize=0:dropout_transition=0[amx]"); mix = "[amx]";
+        }
+        var norm = a.Normalize switch
+        {
+            "Loudnorm" => $"loudnorm=I={V(Math.Clamp(a.TargetLufs, -70, -5))}:TP=-1.5:LRA=11,",
+            "Dynaudnorm" => "dynaudnorm=f=250:g=15:p=0.9,",
+            _ => "",
+        };
+        f.Add($"{mix}{norm}aresample=44100[aout]");
+        return f;
+    }
+
     const int M = 20; // overlay margin in px
 
     public static string JoinUrl(string server, string key)
@@ -117,7 +174,7 @@ public static class CommandBuilder
         return args;
     }
 
-    public static string EncoderGraph(Profile p, bool hasLogo)
+    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1)
     {
         var o = p.Overlays; var f = new List<string>(); string cur = "[v0]";
         f.Add($"[0:v]setpts=PTS-STARTPTS,fps={p.Fps}[v0]");  // timestamp based: robust to partial (skipped) segments
@@ -127,7 +184,7 @@ public static class CommandBuilder
         {
             int lw = Math.Max(2, (int)(p.Width * Math.Clamp(o.ImageScale, 0.01, 1.0)));
             var (x, y) = OverlayPos(o.ImageCorner);
-            f.Add($"[1:v]scale={lw}:-1,format=rgba,colorchannelmixer=aa={Math.Clamp(o.ImageOpacity, 0, 1).ToString("0.00", Inv)}[logo]");
+            f.Add($"[1:v]scale={lw}:-1,format=rgba,colorchannelmixer@logo=aa={Math.Clamp(o.ImageOpacity, 0, 1).ToString("0.00", Inv)}[logo]");
             var nx = Next(); f.Add($"{cur}[logo]overlay=x={x}:y={y}{nx}"); cur = nx;
         }
         if (o.TextEnabled && !string.IsNullOrWhiteSpace(o.Text))
@@ -136,18 +193,25 @@ public static class CommandBuilder
             if (o.Ticker) x = $"'w-mod(t*{Math.Max(10, o.TickerSpeed)}\\,w+tw)'";
             var box = o.TextBackground ? ":box=1:boxcolor=0x000000@0.5:boxborderw=8" : ":borderw=2:bordercolor=0x000000";
             var nx = Next();
-            f.Add($"{cur}drawtext=fontfile={FontName}:textfile={TextFile}:expansion=none:fontsize={o.FontSize}:fontcolor={Color(o.FontColor)}:x={x}:y={y}{box}{nx}"); cur = nx;
+            f.Add($"{cur}drawtext@text=fontfile={FontName}:textfile={TextFile}:expansion=none:fontsize={o.FontSize}:fontcolor={Color(o.FontColor)}:x={x}:y={y}{box}{nx}"); cur = nx;
         }
         if (o.ClockEnabled)
         {
             var (x, y) = TextPos(o.ClockCorner);
             var nx = Next();
-            f.Add($"{cur}drawtext=fontfile={FontName}:textfile={ClockFile}:fontsize={o.ClockFontSize}:fontcolor=white:x={x}:y={y}:box=1:boxcolor=0x000000@0.5:boxborderw=6{nx}"); cur = nx;
+            f.Add($"{cur}drawtext@clock=fontfile={FontName}:textfile={ClockFile}:fontsize={o.ClockFontSize}:fontcolor=white:x={x}:y={y}:box=1:boxcolor=0x000000@0.5:boxborderw=6{nx}"); cur = nx;
+        }
+        if (lo is { TextOverlays: true })
+        {   // chat-command responses (bottom-left) and alerts (top-centre), refreshed every frame from files the app rewrites
+            var nx = Next();
+            f.Add($"{cur}drawtext@chat=fontfile={FontName}:textfile={ChatFile}:reload=1:expansion=none:fontsize={Math.Max(16, p.Height / 30)}:fontcolor=white:x=24:y=h-th-24:box=1:boxcolor=0x000000@0.6:boxborderw=10{nx}"); cur = nx;
+            nx = Next();
+            f.Add($"{cur}drawtext@alert=fontfile={FontName}:textfile={AlertFile}:reload=1:expansion=none:fontsize={Math.Max(20, p.Height / 16)}:fontcolor=yellow:x=(w-tw)/2:y=h/8:borderw=3:bordercolor=0x000000:box=1:boxcolor=0x4B0082@0.7:boxborderw=16{nx}"); cur = nx;
         }
         f.Add($"{cur}split=2[vs][pvs]");
         f.Add($"[vs]format={PixFmt(p.Encoder)}[vout]");
         f.Add("[pvs]fps=1,scale=320:-2,format=yuvj420p[pv]");
-        f.Add("[0:a]asetpts=PTS-STARTPTS,aresample=44100:async=1000:first_pts=0[aout]");
+        f.AddRange(AudioGraph(p, lo, musicIdx, micIdx));
         return string.Join(";", f);
     }
 
@@ -182,12 +246,16 @@ public static class CommandBuilder
 
     /// <summary>Long-lived encoder: reads continuous MPEG-TS on stdin, applies overlays, sends FLV to every destination
     /// (tee muxer, a failing destination does not stop the others) + optional MKV recording + preview JPEG.</summary>
-    public static List<string> EncoderArgs(Profile p, IReadOnlyList<Destination> dests, bool hasLogo)
+    public static List<string> EncoderArgs(Profile p, IReadOnlyList<Destination> dests, bool hasLogo, LiveOptions? lo = null)
     {
         var a = new List<string> { "-hide_banner", "-y", "-nostats", "-progress", "pipe:1", "-stats_period", "1",
             "-thread_queue_size", "1024", "-reinit_filter", "0", "-re", "-f", "mpegts", "-i", "pipe:0" };
-        if (hasLogo) { a.Add("-i"); a.Add(p.Overlays.ImagePath); }
-        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo), "-map", "[vout]", "-map", "[aout]" });
+        int next = 1;
+        if (hasLogo) { a.Add("-i"); a.Add(p.Overlays.ImagePath); next++; }
+        int musicIdx = -1, micIdx = -1;
+        if (lo is { MusicPort: > 0 }) { a.AddRange(MusicInputArgs(lo.MusicPort)); musicIdx = next++; }
+        if (!string.IsNullOrWhiteSpace(lo?.MicDevice)) { a.AddRange(MicInputArgs(lo.MicDevice!)); micIdx = next++; }
+        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx), "-map", "[vout]", "-map", "[aout]" });
         a.AddRange(VideoEncoderArgs(p));
         a.AddRange(new[] { "-c:a", "aac", "-b:a", p.AudioKbps + "k", "-ar", "44100", "-ac", "2" });
         if (dests.Count == 1 && !dests[0].IsRecording)

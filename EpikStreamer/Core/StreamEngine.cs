@@ -37,6 +37,20 @@ public sealed class StreamEngine
     /// <summary>Bytes of rendered MPEG-TS buffered ahead of the encoder (~2-4 s at 720p).</summary>
     public int QueueChunks { get; set; } = 64;
 
+    // ---- v2.2 live features ----
+    /// <summary>Draw chat-command responses and alerts on the stream (needs a font).</summary>
+    public bool TextOverlays { get; set; }
+    /// <summary>Allow runtime control (mute / overlay toggles) through ffmpeg's azmq filter when the build has it.</summary>
+    public bool RuntimeControl { get; set; } = true;
+    public bool MusicMuted { get; private set; }
+    public bool MicMuted { get; private set; }
+    public bool OverlaysHidden { get; private set; }
+    public string CurrentMusic { get; private set; } = "";
+    public bool ControlAvailable => _ctl != null;
+    StreamControl? _ctl; int _musicGen;
+    readonly object _txtLk = new();
+    System.Threading.Timer? _alertTimer, _chatTimer;
+
     volatile bool _stop, _skip;
     Process? _enc, _feed;
     readonly object _lk = new();
@@ -88,7 +102,123 @@ public sealed class StreamEngine
         { Emit("Next item is already starting."); return; }
         _skip = true; KillFeeder();
     }
-    public void Stop() { _stop = true; _cts?.Cancel(); KillFeeder(); }
+    public void Stop() { _stop = true; _cts?.Cancel(); KillFeeder(); Interlocked.Increment(ref _musicGen); }
+
+    // ---- runtime control (v2.2) ----
+    bool MusicActive => _p.Audio.MusicEnabled && _p.Audio.MusicPlaylist.Any(File.Exists);
+    bool MicActive => _p.Audio.MicEnabled && !string.IsNullOrWhiteSpace(_p.Audio.MicDevice);
+    public bool HasMusic => MusicActive;
+    public bool HasMic => MicActive;
+
+    static readonly Dictionary<string, bool> _azmqCache = new();
+    /// <summary>True if this ffmpeg build has the azmq filter (BtbN/gyan builds do).</summary>
+    public static bool SupportsAzmq(string ffmpeg)
+    {
+        lock (_azmqCache)
+        {
+            if (_azmqCache.TryGetValue(ffmpeg, out var b)) return b;
+            try
+            {
+                var psi = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                psi.ArgumentList.Add("-hide_banner"); psi.ArgumentList.Add("-filters");
+                using var pr = Process.Start(psi)!; var o = pr.StandardOutput.ReadToEnd(); pr.WaitForExit(5000);
+                b = Regex.IsMatch(o, @"\sazmq\s");
+            }
+            catch { b = false; }
+            return _azmqCache[ffmpeg] = b;
+        }
+    }
+
+    bool Ctl(string target, string cmd, string arg)
+    {
+        var c = _ctl; if (c == null) { Emit("Runtime control is unavailable with this ffmpeg build (needs azmq)."); return false; }
+        var r = c.Send(target, cmd, arg);
+        if (r == null || !r.StartsWith("0 ")) { Emit($"Control '{target} {cmd} {arg}' failed: {r ?? "no reply"}"); return false; }
+        return true;
+    }
+    public bool SetMusicMuted(bool m) { MusicMuted = m; return !MusicActive || !IsRunning || Ctl("volume@music", "volume", m ? "0" : Inv(_p.Audio.MusicVolume)); }
+    public bool SetMicMuted(bool m) { MicMuted = m; return !MicActive || !IsRunning || Ctl("volume@mic", "volume", m ? "0" : Inv(_p.Audio.MicVolume)); }
+    public bool SetMusicVolume(double v) { _p.Audio.MusicVolume = v; return MusicMuted || !MusicActive || !IsRunning || Ctl("volume@music", "volume", Inv(v)); }
+    public bool SetMicVolume(double v) { _p.Audio.MicVolume = v; return MicMuted || !MicActive || !IsRunning || Ctl("volume@mic", "volume", Inv(v)); }
+    /// <summary>Hide/show logo, text and clock overlays (alerts/chat responses stay visible).</summary>
+    public bool SetOverlaysHidden(bool h)
+    {
+        OverlaysHidden = h; if (!IsRunning) return true; bool ok = true; var o = _p.Overlays;
+        if (o.ImageEnabled && File.Exists(o.ImagePath)) ok &= Ctl("colorchannelmixer@logo", "aa", h ? "0" : Inv(Math.Clamp(o.ImageOpacity, 0, 1)));
+        if (o.TextEnabled && !string.IsNullOrWhiteSpace(o.Text)) ok &= Ctl("drawtext@text", "enable", h ? "0" : "1");
+        if (o.ClockEnabled) ok &= Ctl("drawtext@clock", "enable", h ? "0" : "1");
+        return ok;
+    }
+    static string Inv(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+
+    /// <summary>Shows an alert banner on stream for <paramref name="seconds"/> (drawtext reload=1 picks it up next frame).</summary>
+    public void ShowAlert(string text, double seconds) => ShowText(CommandBuilder.AlertFile, text, seconds, ref _alertTimer);
+    public void ShowChatResponse(string text, double seconds) => ShowText(CommandBuilder.ChatFile, text, seconds, ref _chatTimer);
+    void ShowText(string file, string text, double seconds, ref System.Threading.Timer? timer)
+    {
+        if (!TextOverlays) return;
+        WriteOverlay(file, text);
+        timer?.Dispose();
+        timer = new System.Threading.Timer(_ => WriteOverlay(file, ""), null, TimeSpan.FromSeconds(Math.Max(1, seconds)), Timeout.InfiniteTimeSpan);
+    }
+    /// <summary>Atomic replace so drawtext never reads a half-written file (it keeps the old text if a read fails).</summary>
+    public void WriteOverlay(string file, string text)
+    {
+        lock (_txtLk)
+        {
+            var path = Path.Combine(WorkDir, file); var tmp = path + ".tmp";
+            text = (text ?? "").Replace("\r", "");
+            for (int i = 0; i < 5; i++)
+            {
+                try { File.WriteAllText(tmp, text, new UTF8Encoding(false)); File.Move(tmp, path, true); return; }
+                catch (IOException) { Thread.Sleep(20); }
+                catch (UnauthorizedAccessException) { Thread.Sleep(20); }
+            }
+        }
+    }
+
+    // ---- background music pump (v2.2) ----
+    void StartMusic(int port)
+    {
+        int gen = Interlocked.Increment(ref _musicGen);
+        new Thread(() => MusicLoop(port, gen)) { IsBackground = true, Name = "music pump" }.Start();
+    }
+    void MusicLoop(int port, int gen)
+    {
+        System.Net.Sockets.TcpClient? tc = null;
+        for (int i = 0; i < 200 && gen == _musicGen && !_stop; i++)
+        {
+            try { tc = new System.Net.Sockets.TcpClient(); tc.Connect(System.Net.IPAddress.Loopback, port); break; }
+            catch { tc?.Dispose(); tc = null; Thread.Sleep(100); }
+        }
+        if (tc == null) { if (gen == _musicGen && !_stop) Emit("♪ Could not connect the music feed to the encoder."); return; }
+        using var _tc = tc; var net = tc.GetStream(); var buf = new byte[1 << 16];
+        var files = _p.Audio.MusicPlaylist.Where(File.Exists).ToList(); int k = 0; int fails = 0;
+        try
+        {
+            while (gen == _musicGen && !_stop && files.Count > 0)
+            {
+                if (k % files.Count == 0 && _p.Audio.MusicShuffle) files = files.OrderBy(_ => Random.Shared.Next()).ToList();
+                var f = files[k++ % files.Count];
+                CurrentMusic = Path.GetFileNameWithoutExtension(f);
+                var psi = new ProcessStartInfo(_ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                foreach (var a in CommandBuilder.MusicFeederArgs(f)) psi.ArgumentList.Add(a);
+                using var pr = Process.Start(psi)!;
+                pr.ErrorDataReceived += (_, e) => { if (e.Data != null) Emit("[music] " + e.Data); }; pr.BeginErrorReadLine();
+                long total = 0; int n;
+                try
+                {
+                    var so = pr.StandardOutput.BaseStream;
+                    while (gen == _musicGen && !_stop && (n = so.Read(buf, 0, buf.Length)) > 0) { net.Write(buf, 0, n); total += n; }
+                }
+                finally { try { if (!pr.HasExited) pr.Kill(true); } catch { } }
+                if (total == 0) { if (++fails >= files.Count) { Emit("♪ No playable music files."); break; } } else fails = 0;
+            }
+        }
+        catch (Exception) { /* encoder went away; the next encoder start begins a new pump */ }
+        CurrentMusic = "";
+    }
+
     public bool Wait(int ms) => _thread?.Join(ms) ?? true;
 
     /// <summary>Test hook: kill the encoder to simulate a dropped connection.</summary>
@@ -106,7 +236,15 @@ public sealed class StreamEngine
             File.Copy(font, Path.Combine(WorkDir, CommandBuilder.FontName), true); // referenced relatively => no path escaping issues
         }
         var utf8 = new UTF8Encoding(false);
+        if (TextOverlays && !(o.TextEnabled || o.ClockEnabled))
+        {
+            var font = string.IsNullOrWhiteSpace(o.FontFile) ? CommandBuilder.DefaultFont() : o.FontFile;
+            if (File.Exists(font)) File.Copy(font, Path.Combine(WorkDir, CommandBuilder.FontName), true);
+            else { Emit("No font for on-stream alerts/chat responses; they're disabled. " + font); TextOverlays = false; }
+        }
         File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.TextFile), o.Text ?? "", utf8);
+        File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.AlertFile), "", utf8);
+        File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.ChatFile), "", utf8);
         var fmt = string.IsNullOrWhiteSpace(o.ClockFormat) ? "" : ":" + o.ClockFormat;
         File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.ClockFile), "%{localtime" + fmt + "}", utf8);
         try { File.Delete(PreviewPath); } catch { }
@@ -157,7 +295,8 @@ public sealed class StreamEngine
         catch (Exception ex) { Emit("Engine error: " + ex); State?.Invoke("Error: " + ex.Message); }
         finally
         {
-            KillFeeder(); try { if (_enc is { HasExited: false }) _enc.Kill(true); } catch { }
+            KillFeeder(); Interlocked.Increment(ref _musicGen); try { if (_enc is { HasExited: false }) _enc.Kill(true); } catch { }
+            _ctl?.Dispose(); _ctl = null; _alertTimer?.Dispose(); _chatTimer?.Dispose();
             for (int i = 0; i < _netDests.Count; i++) DestinationStatus?.Invoke(i, DestState.Stopped, "");
             RemuxRecordings();
             IsRunning = false; Finished?.Invoke();
@@ -179,7 +318,13 @@ public sealed class StreamEngine
             dests.Add(new CommandBuilder.Destination("Recording", path, true));
             Recordings.Add(path); Emit("● Recording to " + path);
         }
-        var args = CommandBuilder.EncoderArgs(_p, dests, hasLogo);
+        var a = _p.Audio;
+        int ctlPort = RuntimeControl && SupportsAzmq(_ffmpeg) ? StreamControl.FreePort() : 0;
+        int musicPort = MusicActive ? StreamControl.FreePort() : 0;
+        var lo = new CommandBuilder.LiveOptions(ctlPort, musicPort, MicActive ? a.MicDevice : null, TextOverlays,
+            MusicMuted ? 0 : a.MusicVolume, MicMuted ? 0 : a.MicVolume, a.MainVolume);
+        _ctl?.Dispose(); _ctl = ctlPort > 0 ? new StreamControl(ctlPort) : null;
+        var args = CommandBuilder.EncoderArgs(_p, dests, hasLogo, lo);
         Emit("> ffmpeg " + CommandBuilder.Display(args, _secrets));
         var psi = new ProcessStartInfo(_ffmpeg)
         {
@@ -226,6 +371,7 @@ public sealed class StreamEngine
         };
         p.Exited += (_, _) => { _cts?.Cancel(); KillFeeder(); }; // unblocks the pump so we can reconnect
         p.Start(); p.BeginOutputReadLine(); p.BeginErrorReadLine();
+        if (musicPort > 0) StartMusic(musicPort);
         lock (_lk) _enc = p;
         _lastProgress = DateTime.UtcNow; _outTime = 0; _encTl0 = _tl;
 

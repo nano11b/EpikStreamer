@@ -28,7 +28,7 @@ public class SignInWindow : Window
     {
         _audience = audience;
         Owner = owner; Title = "Sign in to EpikChat"; Width = 1100; Height = 800; WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = (Brush)owner.FindResource("Bg");
+        SetResourceReference(BackgroundProperty, "Bg");
         _signOut = new Button { Content = "Sign out", Style = (Style)owner.FindResource("Secondary") };
         var close = new Button { Content = "Close", Style = (Style)owner.FindResource("Secondary"), IsCancel = true };
         _getKey.Click += async (_, _) => await RunAutomation();

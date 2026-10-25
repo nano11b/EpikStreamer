@@ -91,6 +91,7 @@ public class Profile
         Outputs.Add(new OutputTarget { Name = preset, Preset = preset, ServerUrl = ServerUrl, ProtectedKey = ProtectedKey, Enabled = true });
     }
     public OverlaySettings Overlays { get; set; } = new();
+    public AudioSettings Audio { get; set; } = new();   // v2.2
 
     public Profile Clone(string newName)
     {
@@ -142,6 +143,18 @@ public class ProfileStore
     public string? ProtectedGitHubToken { get; set; }   // optional, DPAPI; only for GitHub API rate limits
     public bool ChatPanelVisible { get; set; }
     public bool ChatCompact { get; set; } = true;
+    // v2.2
+    public string Theme { get; set; } = "Dark";          // Dark | Light | Midnight Blue | Epik Purple
+    public bool MinimizeToTray { get; set; } = true;
+    public bool CloseToTray { get; set; }
+    public bool Notifications { get; set; } = true;
+    public bool LaunchAtStartup { get; set; }
+    public bool StartMinimized { get; set; } = true;
+    public bool SchedulerEnabled { get; set; } = true;
+    public List<ScheduleEntry> Schedule { get; set; } = new();
+    public HotkeySettings Hotkeys { get; set; } = new();
+    public ChatSettings Chat { get; set; } = new();
+    public int ControlPort { get; set; } = 0;          // 0 = pick a free port per session
     public List<Profile> Profiles { get; set; } = new();
 
     public static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
