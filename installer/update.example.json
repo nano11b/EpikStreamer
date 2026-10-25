@@ -1,0 +1,6 @@
+{
+  "version": "2.1.0",
+  "url": "https://github.com/nano11b/EpikStreamer/releases/download/v2.1.0/EpikStreamer-2.1.0-setup.exe",
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "notes": "Example manifest. release.ps1 writes the real one (dist\\update.json) and uploads it as a release asset named update.json."
+}

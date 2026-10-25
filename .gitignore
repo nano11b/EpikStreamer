@@ -1,0 +1,29 @@
+# build output
+bin/
+obj/
+dist/
+fdd/
+*.user
+.vs/
+# release artifacts
+*.zip
+*-setup.exe
+*.sha256
+update.json
+# bundled ffmpeg binaries (downloaded at build time)
+ffmpeg/
+ffmpeg.exe
+ffprobe.exe
+**/ffmpeg/*.exe
+# local test media / logs
+*.mp4
+*.mkv
+*.flv
+*.log
+*.pid
+
+# local secrets (never commit)
+.rtmp_url
+*.key
+*.pfx
+.env
