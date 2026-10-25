@@ -1,0 +1,97 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<style>body{font:14px sans-serif;margin:0} .pane{height:400px;overflow:auto} [role=toolbar]{display:none} .row:hover [role=toolbar]{display:flex}</style></head>
+<body>
+<!-- Mirrors EpikChat's real chat DOM (2026-10-25): header heading, account button, per-room panes toggled by aria-hidden,
+     react-virtuoso scroller (role=log "Chat messages") with ~44 rendered rows that churn, member list Virtuoso, composer form. -->
+<header>
+  <div role="heading" aria-level="1" id="roomTitle">Lobby</div>
+  <button aria-label="Account menu" aria-haspopup="menu" data-account-button>MeStreamer</button>
+</header>
+<main>
+  <div id="paneWrapA" aria-hidden="false">
+    <div data-chat-message-viewport><div role="log" aria-label="Chat messages" data-virtuoso-scroller="true" class="pane" id="logA">
+      <div data-viewport-type="element"><div data-testid="virtuoso-item-list" id="listA"></div></div></div></div>
+  </div>
+  <div id="paneWrapB" aria-hidden="true" style="display:none">
+    <div data-chat-message-viewport><div role="log" aria-label="Chat messages" data-virtuoso-scroller="true" class="pane" id="logB">
+      <div data-viewport-type="element"><div data-testid="virtuoso-item-list" id="listB"></div></div></div></div>
+  </div>
+  <aside><div role="list" aria-label="Room members" data-virtuoso-scroller="true"><div data-testid="virtuoso-item-list">
+    <div data-index="0"><button aria-label="Open alice">alice</button></div></div></div></aside>
+  <form id="composerForm"><input data-chat-composer-input aria-label="Chat message" type="text" maxlength="250" placeholder="Message"></form>
+</main>
+<script>
+let seq = 0x65a000000000000000000000n;
+const nid = () => (seq += 1n).toString(16).padStart(24, '0');
+const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+// text may contain :rocket: which becomes a real emoji span structure
+const body = t => esc(t).replace(/:rocket:/g, '<span role="img" aria-label="🚀"><span data-emoji-copy-text="🚀">🚀</span><span data-emoji-fallback>:rocket:</span><img alt="🚀" src="data:,"></span>');
+function rowHtml(id, user, text, opt = {}) {
+  if (opt.system) return `<div data-chat-message-row="${id}" id="chat-message-${id}" data-chat-system-variant="banner"><div>Welcome to the Lobby! Type !help to see commands</div></div>`;
+  const tags = opt.bot ? `<span data-chat-sender-tags><span data-chat-tag="bot">BOT</span></span>` : `<span data-chat-sender-tags></span>`;
+  const quote = opt.reply ? `<div class="mt-px"><button aria-label="${opt.reply.user}'s profile">${opt.reply.user}</button><span class="truncate">${esc(opt.reply.text)}</span></div>` : '';
+  return `<div data-chat-message-row="${id}" id="chat-message-${id}" class="row">
+    <button aria-label="Open ${user}"><img alt="" src="data:,"></button>
+    <div data-chat-message-layout>
+      <div><button>${user}</button>${tags}<time datetime="2026-10-25T23:40:00.000Z">7:40 PM</time></div>
+      ${quote}
+      <div>${opt.embed ? '' : body(text)}</div>
+    </div>
+    <div role="toolbar"><button aria-label="React">😀</button><button>!song</button><button>Reply</button></div>
+  </div>`;
+}
+let idx = 0;
+function append(list, id, user, text, opt) {
+  const w = document.createElement('div'); w.setAttribute('data-index', idx++); w.setAttribute('data-item-index', idx);
+  w.innerHTML = rowHtml(id, user, text, opt); list.appendChild(w);
+  while (list.children.length > 44) list.firstElementChild.remove();       // virtualization: drop rows off the top
+}
+const listA = document.getElementById('listA'), listB = document.getElementById('listB');
+// backlog (must NOT trigger commands)
+append(listA, 'welcome:lobby', '', '', { system: true });
+for (let i = 0; i < 50; i++) append(listA, nid(), 'old' + (i % 5), i % 7 ? 'backlog chatter ' + i : '!song');
+for (let i = 0; i < 10; i++) append(listB, nid(), 'roomb', i % 3 ? 'room B old ' + i : '!uptime');
+// composer: React-style controlled input; Enter / requestSubmit posts a row as the signed-in user
+const input = document.querySelector('[data-chat-composer-input]');
+let state = ''; input.addEventListener('input', e => { state = e.target.value; });
+const sent = [];
+document.getElementById('composerForm').addEventListener('submit', e => {
+  e.preventDefault(); if (!state) return; sent.push(state);
+  append(listA, nid(), 'MeStreamer', state); state = ''; input.value = '';
+});
+const steps = [];
+const at = (ms, f) => steps.push([ms, f]);
+// live traffic
+at(1500, () => append(listA, nid(), 'alice', '!song'));
+at(1600, () => append(listA, nid(), 'bob', '  !HELP :rocket: please'));
+at(1700, () => append(listA, nid(), 'carol', 'hello there', { reply: { user: 'alice', text: '!song' } }));   // quote contains !song: not a command
+at(1800, () => append(listA, nid(), 'EpikBot', '!uptime', { bot: true }));
+at(1900, () => append(listA, nid(), 'EpikBot', '', { bot: true, embed: true }));
+at(2000, () => append(listA, nid(), 'MeStreamer', '!song'));                                  // our own message
+at(2100, () => append(listA, 'welcome:x2', '', '', { system: true }));
+at(2200, () => { // churn: scroll up re-renders old rows (ids below max) and re-inserts the alice row node
+  const old = [...listA.querySelectorAll('[data-chat-message-row]')].slice(0, 3).map(r => r.parentElement.cloneNode(true));
+  old.forEach(o => listA.insertBefore(o, listA.firstChild));
+  const a = [...listA.querySelectorAll('[data-chat-message-row]')].find(r => r.textContent.includes('alice') && r.textContent.includes('!song'));
+  const c = a.parentElement.cloneNode(true); a.parentElement.remove(); listA.appendChild(c);
+});
+at(2300, () => append(listB, nid(), 'hidden', '!song'));                                      // hidden pane: ignored
+at(2400, () => append(listA, nid(), 'dave', '!uptime'));
+at(3500, () => { window.__sendResult = window.__epikSend('Now playing: Test Song'); });         // reply path (opt-in in the app)
+at(4500, () => {   // room switch: B becomes visible; its existing rows are backlog
+  document.getElementById('paneWrapA').setAttribute('aria-hidden', 'true'); document.getElementById('paneWrapA').style.display = 'none';
+  document.getElementById('paneWrapB').setAttribute('aria-hidden', 'false'); document.getElementById('paneWrapB').style.display = '';
+  document.getElementById('roomTitle').textContent = 'Room B';
+});
+at(7000, () => append(listB, nid(), 'erin', '!song'));
+at(9000, () => {
+  document.title = JSON.stringify({ posted: window.__posted, statuses: window.__statuses, sent, sendResult: window.__sendResult, diag: JSON.parse(window.__epikDiag()) });
+});
+window.__posted = []; window.__statuses = [];
+window.__epikTap = m => { if (m.type === 'epik-chat') window.__posted.push(m); else window.__statuses.push(m.text); };
+const t0 = Date.now();
+steps.forEach(([ms, f]) => setTimeout(f, ms));
+</script>
+<script src="chat-observer.js"></script>
+</body></html>

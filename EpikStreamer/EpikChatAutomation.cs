@@ -187,17 +187,15 @@ public static class EpikChatAutomation
     /// <summary>Text fallback for live status ("You're live", "Broadcasting", "Stop broadcast"). UNTESTED.</summary>
     public const string LiveTextRegex = @"\b(you(?:'|’)?re live|you are live|broadcasting|on air|stop (?:broadcast|stream(?:ing)?)|end (?:broadcast|stream))\b";
 
-    /// <summary>Chat message rows (newly added nodes matching these are treated as messages). UNTESTED guesses.</summary>
-    public static readonly string[] ChatMessageSelectors =
+    /// <summary>v2.2.2: chat messages are read by Web/chat-observer.js, which matches EpikChat's real DOM
+    /// (role=log "Chat messages" Virtuoso list, [data-chat-message-row] ids, [data-chat-message-layout], composer input).</summary>
+    public static string ChatObserverJs(bool debug, string selfName)
     {
-        "[data-message-id]", "[data-msg-id]", ".chat-message", ".message", "[class*='chat-message' i]", "[class*='ChatMessage']", "[class*='message-item' i]", "li[class*='message' i]", "[role='listitem']",
-    };
-    /// <summary>Within a message row: the author and the text. UNTESTED guesses; fallback parses "user: text".</summary>
-    public static readonly string[] ChatUserSelectors = { "[data-username]", "[class*='username' i]", "[class*='user-name' i]", "[class*='author' i]", "[class*='nick' i]", "[class*='name' i]" };
-    public static readonly string[] ChatTextSelectors = { "[class*='message-text' i]", "[class*='message-body' i]", "[class*='content' i]", "[class*='text' i]", "[class*='body' i]", "p" };
-    /// <summary>Chat input + send button, used ONLY when the user enables "Reply in chat" (off by default). UNTESTED guesses.</summary>
-    public static readonly string[] ChatInputSelectors = { "textarea[placeholder*='message' i]", "input[placeholder*='message' i]", "[contenteditable='true'][role='textbox']", "form textarea", "[class*='chat' i] textarea", "[class*='chat' i] input[type='text']" };
-    public static readonly string[] ChatSendSelectors = { "button[type='submit']", "button[aria-label*='send' i]", "button[title*='send' i]", "[class*='send' i] button", "button[class*='send' i]" };
+        using var st = typeof(EpikChatAutomation).Assembly.GetManifestResourceStream("EpikStreamer.Web.chat-observer.js")!;
+        using var rd = new System.IO.StreamReader(st);
+        var cfg = System.Text.Json.JsonSerializer.Serialize(new { debug, selfName });
+        return "window.__EPIK_CFG = " + cfg + ";\n" + rd.ReadToEnd();
+    }
 
     /// <summary>Compact mode: hide site chrome (header/nav/footer/ads) and tighten spacing so chat fits a narrow panel. UNTESTED.</summary>
     public const string CompactCss = """
@@ -235,38 +233,6 @@ img[class*='avatar' i] { width: 22px !important; height: 22px !important; }
     if (!live) live = new RegExp(CFG.liveRe, 'i').test(body);
     return { viewers, live };
   };
-  // ---- chat messages (v2.2): only rows added after the page settles are reported ----
-  const q1 = (root, sels) => { for (const sel of sels) { try { const e = root.matches && root.matches(sel) ? root : root.querySelector(sel); if (e) return e; } catch { } } return null; };
-  const isMsg = n => { for (const sel of CFG.msgSel) { try { if (n.matches(sel)) return true; } catch { } } return false; };
-  let ready = false; const seen = new WeakSet(); let seq = 0;
-  const report = n => {
-    if (!ready || seen.has(n) || !n.isConnected) return; seen.add(n);
-    let user = '', text = '';
-    const u = q1(n, CFG.userSel); if (u && u !== n) user = (u.getAttribute('data-username') || u.innerText || '').trim();
-    const t = q1(n, CFG.textSel); if (t && t !== n && t !== u) text = (t.innerText || '').trim();
-    if (!text) { const all = (n.innerText || '').trim(); const m = all.match(/^([^:\n]{1,40}):\s*([\s\S]+)$/); if (m) { user = user || m[1].trim(); text = m[2].trim(); } else text = all.replace(user, '').trim(); }
-    if (!text || text.length > 500) return;
-    const id = n.getAttribute('data-message-id') || n.getAttribute('data-msg-id') || n.id || ('n' + (++seq));
-    try { window.chrome.webview.postMessage({ type: 'epik-chat', user: user.slice(0, 60), text, id }); } catch { }
-  };
-  const onAdded = muts => {
-    for (const m of muts) for (const n of m.addedNodes) {
-      if (n.nodeType !== 1) continue;
-      if (isMsg(n)) report(n); else for (const sel of CFG.msgSel) { try { n.querySelectorAll(sel).forEach(report); } catch { } }
-    }
-  };
-  // Opt-in only (the app calls this solely when "Reply in chat" is enabled): types into the normal chat box and sends.
-  window.__epikSend = txt => {
-    const box = q1(document, CFG.inputSel); if (!box) return 'no-input';
-    box.focus();
-    if (box.isContentEditable) { box.textContent = txt; }
-    else { const proto = box.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(box, txt); }
-    box.dispatchEvent(new Event('input', { bubbles: true }));
-    const btn = q1(box.closest('form') || document, CFG.sendSel);
-    if (btn && !btn.disabled) { btn.click(); return 'clicked'; }
-    for (const type of ['keydown', 'keypress', 'keyup']) box.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-    return 'enter';
-  };
   let last = '', timer = 0;
   const post = () => {
     timer = 0;
@@ -276,15 +242,13 @@ img[class*='avatar' i] { width: 22px !important; height: 22px !important; }
   const schedule = () => { if (!timer) timer = setTimeout(post, 1000); };   // throttle: at most once a second
   const start = () => {
     window.__epikSetCompact(CFG.compact);
-    new MutationObserver(muts => { schedule(); try { onAdded(muts); } catch { } }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
+    new MutationObserver(() => schedule()).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
     setInterval(schedule, 15000); post();
-    setTimeout(() => { ready = true; }, 3000);   // ignore the backlog rendered on load
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
 """.Replace("__CFG__", System.Text.Json.JsonSerializer.Serialize(new
     {
-        css = CompactCss, viewerSel = ViewerCountSelectors, viewerRe = ViewerTextRegex, liveSel = LiveSelectors, liveRe = LiveTextRegex, compact,
-        msgSel = ChatMessageSelectors, userSel = ChatUserSelectors, textSel = ChatTextSelectors, inputSel = ChatInputSelectors, sendSel = ChatSendSelectors
+        css = CompactCss, viewerSel = ViewerCountSelectors, viewerRe = ViewerTextRegex, liveSel = LiveSelectors, liveRe = LiveTextRegex, compact
     }));
 }

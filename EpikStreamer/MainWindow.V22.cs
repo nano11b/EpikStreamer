@@ -33,6 +33,8 @@ public partial class MainWindow
         RebuildChatEngines();
         RefreshSchedule(); RefreshHistory();
         _chat.MessageReceived += m => Dispatcher.BeginInvoke(() => OnChatMessage(m));
+        _chat.ObserverStatus += t => Dispatcher.BeginInvoke(() => { ChatObsStatus.Text = "Chat observer: " + t; Log("💬 chat observer: " + t); });
+        ApplyChatPanelConfig();
         _schedTimer.Tick += (_, _) => SchedulerTick(); _schedTimer.Start();
         SourceInitialized += (_, _) => { _hotkeys = new GlobalHotkeys(this); ApplyHotkeys(); };
         _tray = new Tray(ShowMain, () => Dispatcher.BeginInvoke(ToggleStartStop), () => _engine?.Skip(),
@@ -57,6 +59,7 @@ public partial class MainWindow
         CmdOverlaySecs.Text = c.OverlaySeconds.ToString(); CmdCooldown.Text = c.CooldownSeconds.ToString();
         SongTpl.Text = c.SongTemplate; UptimeTpl.Text = c.UptimeTemplate;
         CustomCmds.Text = string.Join(Environment.NewLine, c.Custom.Select(x => (x.Enabled ? "" : "#") + x.Trigger + " = " + x.Response));
+        MyUserBox.Text = c.MyUsername; ReplyIntervalBox.Text = c.ReplyMinIntervalSeconds.ToString(); ChatDebugCheck.IsChecked = c.DebugLog;
         AlertsCheck.IsChecked = c.AlertsEnabled; NewViewerCheck.IsChecked = c.NewViewerAlert; AlertSecs.Text = c.AlertSeconds.ToString();
         NewViewerTpl.Text = c.NewViewerText; MilestonesBox.Text = string.Join(", ", c.Milestones); MilestoneTpl.Text = c.MilestoneText; AlertSoundBox.Text = c.AlertSound;
         _loading = false;
@@ -81,6 +84,9 @@ public partial class MainWindow
             .Select(l => { bool en = !l.StartsWith('#'); var t = l.TrimStart('#').Trim(); int i = t.IndexOf('=');
                            var trig = t[..i].Trim(); if (!trig.StartsWith('!')) trig = "!" + trig;
                            return new ChatCommand { Trigger = trig.Split(' ')[0], Response = t[(i + 1)..].Trim(), Enabled = en }; }).ToList();
+        bool obsChanged = c.MyUsername != MyUserBox.Text.Trim() || c.DebugLog != (ChatDebugCheck.IsChecked == true);
+        c.MyUsername = MyUserBox.Text.Trim(); c.ReplyMinIntervalSeconds = Int(ReplyIntervalBox.Text, 5, 1, 600); c.DebugLog = ChatDebugCheck.IsChecked == true;
+        ApplyChatPanelConfig(); if (obsChanged) _ = _chat.ReloadObserver();
         c.AlertsEnabled = AlertsCheck.IsChecked == true; c.NewViewerAlert = NewViewerCheck.IsChecked == true; c.AlertSeconds = Int(AlertSecs.Text, 6, 1, 60);
         c.NewViewerText = NewViewerTpl.Text; c.MilestoneText = MilestoneTpl.Text; c.AlertSound = AlertSoundBox.Text.Trim();
         c.Milestones = MilestonesBox.Text.Split(',', ';', ' ').Select(x => int.TryParse(x.Trim(), out var v) ? v : 0).Where(v => v > 0).Distinct().OrderBy(v => v).ToList();
@@ -220,18 +226,35 @@ public partial class MainWindow
     }
 
     // ---------- chat commands + alerts ----------
+    string? HandleChatCommand(ChatMessage m, ChatCommands.Context ctx) => _commands.Handle(m, ctx, DateTime.Now);
+
+    void ApplyChatPanelConfig() { var c = _store.Chat; _chat.SelfName = c.MyUsername; _chat.DebugMessages = c.DebugLog; _chat.ReplyMinIntervalSeconds = c.ReplyMinIntervalSeconds; }
+
     void OnChatMessage(ChatMessage m)
     {
-        if (_engine?.IsRunning != true) return;   // commands only while streaming
-        var ctx = new ChatCommands.Context { Song = System.IO.Path.GetFileNameWithoutExtension(_lastStats?.ItemName ?? ""), Uptime = _lastStats?.Uptime ?? TimeSpan.Zero, Viewers = _lastViewers, Music = _engine.CurrentMusic };
-        var resp = _commands.Handle(m, ctx, DateTime.Now);
+        var c = _store.Chat;
+        if (c.DebugLog) Log($"💬 [{m.Room}] {m.User}{(m.IsBot ? " (bot)" : "")}{(m.Self ? " (you)" : "")}: {m.Text}");
+        bool live = _engine?.IsRunning == true;
+        var ctx = new ChatCommands.Context { Song = System.IO.Path.GetFileNameWithoutExtension(_lastStats?.ItemName ?? ""), Uptime = live ? _lastStats?.Uptime ?? TimeSpan.Zero : TimeSpan.Zero, Viewers = _lastViewers, Music = _engine?.CurrentMusic ?? "" };
+        var resp = HandleChatCommand(m, ctx);
         if (resp == null) return;
         Log($"💬 {m.User}: {m.Text} → {resp}");
-        var c = _store.Chat;
-        if (c.ShowOnStream) _engine.ShowChatResponse(resp, c.OverlaySeconds);
-        if (c.ReplyInChat) _ = ReplyAsync(resp);
+        bool shown = false;
+        if (c.ShowOnStream && live) { _engine!.ShowChatResponse(resp, c.OverlaySeconds); shown = true; }
+        if (c.ReplyInChat) { _ = ReplyAsync(resp); shown = true; }
+        if (!shown) Log("   (not streaming, so the response isn't shown anywhere; turn on \"reply in chat\" to answer while offline)");
     }
-    async Task ReplyAsync(string text) { var r = await _chat.SendChat(text); if (!r.Contains("clicked") && !r.Contains("enter")) Log("Chat reply not sent: " + r); }
+    async Task ReplyAsync(string text) { var r = await _chat.SendChat(text); Log(r.StartsWith("sent") ? "💬 replied in chat " + r[4..].Trim() : "⚠ chat reply " + r); }
+
+    async void ChatDiag_Click(object s, RoutedEventArgs e)
+    {
+        var d = await _chat.Diagnostics();
+        if (d == null) { MessageBox.Show(this, "Open the 💬 Chat panel (signed in) first."); return; }
+        var dlg = new SaveFileDialog { Filter = "JSON|*.json", FileName = $"epikchat-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.json" };
+        if (dlg.ShowDialog(this) != true) return;
+        File.WriteAllText(dlg.FileName, d);
+        StatusText.Text = "Chat diagnostics saved (structure only; no message text or names): " + dlg.FileName;
+    }
 
     void OnViewerCount(int? viewers)
     {

@@ -54,7 +54,19 @@ if (mode == "caps")
 }
 if (mode == "helperjs") { Console.Write(EpikStreamer.EpikChatAutomation.HelperJs); return 0; }
 if (mode == "steps") { Console.Write(System.Text.Json.JsonSerializer.Serialize(EpikStreamer.EpikChatAutomation.Steps(args.Length > 1 ? args[1] : "Public"))); return 0; }
-if (mode == "chatjs") { Console.Write(EpikStreamer.EpikChatAutomation.ObserverJs(true)); return 0; }
+if (mode == "chatjs") { Console.Write(EpikStreamer.EpikChatAutomation.ChatObserverJs(true, "")); return 0; }
+if (mode == "chatfeed")
+{   // feeds the messages the JS observer posted in the headless mock (run-chat-mock.sh) through the real command handler
+    var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(args.Length > 1 ? args[1] : "/tmp/chat-posted.json"));
+    var h = new ChatCommands(new ChatSettings { CooldownSeconds = 0 }); var cx = new ChatCommands.Context { Song = "Test Song", Uptime = TimeSpan.FromMinutes(5), Viewers = 3 };
+    int n = 0; var now = DateTime.Now;
+    foreach (var e in doc.RootElement.EnumerateArray())
+    {
+        var msg = new ChatMessage(e.GetProperty("user").GetString()!, e.GetProperty("text").GetString()!, e.GetProperty("id").GetString(), e.GetProperty("isBot").GetBoolean(), e.GetProperty("self").GetBoolean());
+        for (int rep = 0; rep < 2; rep++) { var r = h.Handle(msg, cx, now = now.AddSeconds(1)); if (r != null) { n++; Console.WriteLine($"{msg.User}: {msg.Text} -> {r}"); } }
+    }
+    Console.WriteLine(n == 4 ? "CHATFEED PASSED (4 replies, each once)" : $"CHATFEED FAILED ({n} replies)"); return n == 4 ? 0 : 1;
+}
 if (mode == "args")
 {
     foreach (var a in CommandBuilder.EncoderArgs(MakeProfile(), new List<CommandBuilder.Destination> { new("null", "/tmp/epiktest/replay.flv") }, true)) Console.WriteLine(a);
@@ -97,6 +109,11 @@ if (mode == "v22")
     Check(cc.Handle(new("amy", "hello"), ctx, t) == null && cc.Handle(new("amy", "!nope"), ctx, t) == null, "non-commands ignored");
     Check(cc.Handle(new("z", "!uptime", "m1"), ctx, t.AddSeconds(60)) != null && cc.Handle(new("z", "!uptime", "m1"), ctx, t.AddSeconds(120)) == null, "duplicate message id ignored");
     Check(!cs.ReplyInChat, "reply-in-chat is OFF by default");
+    Check(cc.Handle(new("EpikBot", "!uptime", "b1", IsBot: true), ctx, t.AddSeconds(500)) == null, "bot messages ignored");
+    Check(cc.Handle(new("me", "!uptime", "s1", Self: true), ctx, t.AddSeconds(520)) == null, "own (self-flagged) messages ignored");
+    var csMe = new ChatSettings { MyUsername = "MeStreamer" };
+    Check(new ChatCommands(csMe).Handle(new("mestreamer ", "!song"), ctx, t) == null && new ChatCommands(csMe).Handle(new("alice", "!song"), ctx, t) != null, "configured username ignored (case-insensitive)");
+    Check(new ChatSettings().ReplyMinIntervalSeconds >= 1 && !new ChatSettings().DebugLog, "reply rate-limit default, debug off by default");
     var csOff = new ChatSettings { CommandsEnabled = false };
     Check(new ChatCommands(csOff).Handle(new("a", "!song"), ctx, t) == null, "commands disabled");
     Check(ChatCommands.FormatUptime(TimeSpan.FromSeconds(42)) == "42s" && ChatCommands.FormatUptime(TimeSpan.FromSeconds(125)) == "2m 05s", "uptime format");

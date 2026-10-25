@@ -1,6 +1,7 @@
 namespace EpikStreamer.Core;
 
-public record ChatMessage(string User, string Text, string? Id = null);
+/// <summary>A chat line read from the page. IsBot/Self: never answered (no loops, no bot ping-pong).</summary>
+public record ChatMessage(string User, string Text, string? Id = null, bool IsBot = false, bool Self = false, string Room = "", string Time = "");
 
 /// <summary>Chat command engine (pure; unit-tested). The host supplies live values via <see cref="Context"/>.</summary>
 public sealed class ChatCommands
@@ -19,7 +20,8 @@ public sealed class ChatCommands
     /// <summary>Returns the response for a message or null (not a command, cooldown, duplicate, or our own reply).</summary>
     public string? Handle(ChatMessage m, Context ctx, DateTime now)
     {
-        if (!_s.CommandsEnabled || string.IsNullOrWhiteSpace(m.Text)) return null;
+        if (!_s.CommandsEnabled || string.IsNullOrWhiteSpace(m.Text) || m.IsBot || m.Self) return null;
+        if (_s.MyUsername.Length > 0 && string.Equals(m.User.Trim(), _s.MyUsername.Trim(), StringComparison.OrdinalIgnoreCase)) return null;
         if (m.Id != null) { if (!_seen.Add(m.Id)) return null; _seenQ.Enqueue(m.Id); if (_seenQ.Count > 500) _seen.Remove(_seenQ.Dequeue()); }
         var text = m.Text.Trim();
         if (_ownReplies.Contains(text)) return null;   // never react to our own posted replies

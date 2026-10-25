@@ -15,7 +15,13 @@ namespace EpikStreamer;
 public class ChatPanel : DockPanel
 {
     public event Action<int?, bool>? StatusChanged;   // viewers (null = unknown), live
-    public event Action<Core.ChatMessage>? MessageReceived;  // v2.2: new chat messages (selectors UNTESTED)
+    public event Action<Core.ChatMessage>? MessageReceived;  // v2.2.2: new chat messages (real EpikChat DOM)
+    public event Action<string>? ObserverStatus;              // "attached to Lobby, 44 rows", …
+    /// <summary>Observer config, applied on the next page load (call <see cref="ReloadObserver"/>).</summary>
+    public bool DebugMessages { get; set; }
+    public string SelfName { get; set; } = "";
+    public int ReplyMinIntervalSeconds { get; set; } = 5;
+    string? _chatScriptId; DateTime _lastSend = DateTime.MinValue; readonly SemaphoreSlim _sendLock = new(1, 1);
     public bool IsLoaded2 => _initialized && _wantVisible && !WebViewHost.IsSignInOpen;
     readonly WebView2 _web = new();
     readonly TextBlock _note = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8), Foreground = Brushes.Gray };
@@ -77,6 +83,8 @@ public class ChatPanel : DockPanel
         var core = _web.CoreWebView2;
         if (_scriptId != null) core.RemoveScriptToExecuteOnDocumentCreated(_scriptId);
         _scriptId = await core.AddScriptToExecuteOnDocumentCreatedAsync(EpikChatAutomation.ObserverJs(Compact));
+        if (_chatScriptId != null) core.RemoveScriptToExecuteOnDocumentCreated(_chatScriptId);
+        _chatScriptId = await core.AddScriptToExecuteOnDocumentCreatedAsync(EpikChatAutomation.ChatObserverJs(DebugMessages, SelfName));
     }
 
     async Task ApplyCompact()
@@ -94,14 +102,15 @@ public class ChatPanel : DockPanel
             using var d = JsonDocument.Parse(e.WebMessageAsJson);
             var r = d.RootElement;
             var type = r.GetProperty("type").GetString();
+            string Str(string k) => r.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.String ? x.GetString() ?? "" : "";
+            bool Bool(string k) => r.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.True;
             if (type == "epik-chat")
             {
-                var text = r.TryGetProperty("text", out var tx) ? tx.GetString() ?? "" : "";
-                var user = r.TryGetProperty("user", out var us) ? us.GetString() ?? "" : "";
-                var id = r.TryGetProperty("id", out var mid) ? mid.GetString() : null;
-                if (text.Length > 0) MessageReceived?.Invoke(new Core.ChatMessage(user, text, id));
+                var text = Str("text"); var id = Str("id");
+                if (text.Length > 0) MessageReceived?.Invoke(new Core.ChatMessage(Str("user"), text, id.Length > 0 ? id : null, Bool("isBot"), Bool("self"), Str("room"), Str("time")));
                 return;
             }
+            if (type == "epik-chat-status") { ObserverStatus?.Invoke(Str("text")); return; }
             if (type != "epik-status") return;
             int? viewers = r.TryGetProperty("viewers", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
             bool live = r.TryGetProperty("live", out var l) && l.ValueKind == JsonValueKind.True;
@@ -117,12 +126,62 @@ public class ChatPanel : DockPanel
         else if (_wantVisible) _ = SetActive(true);
     }
 
-    /// <summary>Opt-in ("Reply in chat", off by default): types <paramref name="text"/> into EpikChat's normal chat box as the signed-in user.</summary>
+    /// <summary>Re-inject the observer with the current config (debug / username) and reload the chat page.</summary>
+    public async Task ReloadObserver()
+    {
+        if (!_initialized) return;
+        await RegisterScript();
+        if (IsLoaded2) _web.CoreWebView2.Navigate(EpikChatAutomation.ChatUrl);
+    }
+
+    /// <summary>Opt-in ("Reply in chat", off by default): types <paramref name="text"/> into EpikChat's normal composer as the
+    /// signed-in user and presses Enter. Rate-limited, max 250 chars. Prefers DevTools Input.insertText + Enter (real input
+    /// events React accepts), falling back to the page-side helper (native value setter + input event + form.requestSubmit).</summary>
     public async Task<string> SendChat(string text)
     {
         if (!IsLoaded2) return "chat not open";
-        try { return await _web.CoreWebView2.ExecuteScriptAsync("window.__epikSend ? window.__epikSend(" + JsonSerializer.Serialize(text) + ") : 'no-helper'"); }
-        catch (Exception ex) { return ex.Message; }
+        text = text.Replace('\n', ' ').Trim(); if (text.Length > 250) text = text[..250];
+        if (text.Length == 0) return "empty";
+        await _sendLock.WaitAsync();
+        try
+        {
+            var wait = _lastSend.AddSeconds(Math.Max(1, ReplyMinIntervalSeconds)) - DateTime.Now;
+            if (wait > TimeSpan.Zero) await Task.Delay(wait);
+            _lastSend = DateTime.Now;
+            var core = _web.CoreWebView2; var js = JsonSerializer.Serialize(text);
+            try
+            {
+                var f = JsonSerializer.Deserialize<string>(await core.ExecuteScriptAsync("window.__epikFocusComposer ? window.__epikFocusComposer() : 'no-helper'"));
+                if (f == "ok")
+                {
+                    await core.ExecuteScriptAsync($"window.__epikNoteSent({js})");
+                    await core.CallDevToolsProtocolMethodAsync("Input.insertText", JsonSerializer.Serialize(new { text }));
+                    var v = JsonSerializer.Deserialize<string>(await core.ExecuteScriptAsync("window.__epikComposerValue()"));
+                    if (v == text)
+                    {
+                        // like Puppeteer's press('Enter'): keyDown carrying "\r" (fires keypress + implicit form submit), then keyUp
+                        await core.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent", JsonSerializer.Serialize(new { type = "keyDown", key = "Enter", code = "Enter", windowsVirtualKeyCode = 13, nativeVirtualKeyCode = 13, text = "\r", unmodifiedText = "\r" }));
+                        await core.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent", JsonSerializer.Serialize(new { type = "keyUp", key = "Enter", code = "Enter", windowsVirtualKeyCode = 13, nativeVirtualKeyCode = 13 }));
+                        await Task.Delay(400);
+                        var after = JsonSerializer.Deserialize<string>(await core.ExecuteScriptAsync("window.__epikComposerValue()"));
+                        if (after != text) return "sent (devtools)";
+                    }
+                }
+            }
+            catch { /* fall through to the page helper */ }
+            var r = JsonSerializer.Deserialize<string>(await core.ExecuteScriptAsync("window.__epikSend ? window.__epikSend(" + js + ") : 'no-helper'"));
+            return r is "submitted" or "enter" ? "sent (" + r + ")" : "not sent: " + r;
+        }
+        catch (Exception ex) { return "not sent: " + ex.Message; }
+        finally { _sendLock.Release(); }
+    }
+
+    /// <summary>Sanitized structure of the chat DOM + observer state (no message text, no names), for debugging selectors.</summary>
+    public async Task<string?> Diagnostics()
+    {
+        if (!IsLoaded2) return null;
+        var r = await _web.CoreWebView2.ExecuteScriptAsync("window.__epikDiag ? window.__epikDiag() : 'null'");
+        return JsonSerializer.Deserialize<string>(r);
     }
 
     /// <summary>Sign out: clears cookies/storage of the shared profile (works while the environment is in use).</summary>

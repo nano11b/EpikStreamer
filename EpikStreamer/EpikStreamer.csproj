@@ -9,9 +9,9 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>EpikStreamer</AssemblyName>
     <RootNamespace>EpikStreamer</RootNamespace>
-    <Version>2.2.1</Version>
-    <AssemblyVersion>2.2.1.0</AssemblyVersion>
-    <FileVersion>2.2.1.0</FileVersion>
+    <Version>2.2.2</Version>
+    <AssemblyVersion>2.2.2.0</AssemblyVersion>
+    <FileVersion>2.2.2.0</FileVersion>
     <Product>EpikStreamer</Product>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- WebView2Loader.dll is native: extract it from the single-file bundle at runtime -->
@@ -26,7 +26,7 @@
     <PackageReference Include="NetMQ" Version="4.0.4.5" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
-  <ItemGroup><Resource Include="app.ico" /></ItemGroup>
+  <ItemGroup><Resource Include="app.ico" /><EmbeddedResource Include="Web\chat-observer.js" LogicalName="EpikStreamer.Web.chat-observer.js" /></ItemGroup>
   <!-- If an ffmpeg\ folder exists next to the project, ship it next to the exe. -->
   <ItemGroup Condition="Exists('ffmpeg\ffmpeg.exe')">
     <None Include="ffmpeg\*.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />

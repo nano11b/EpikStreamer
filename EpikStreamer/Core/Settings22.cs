@@ -60,6 +60,12 @@ public class ChatSettings
     public bool CommandsEnabled { get; set; } = true;
     /// <summary>Opt-in: type responses into EpikChat as you. OFF by default; responses otherwise only show on-stream.</summary>
     public bool ReplyInChat { get; set; }
+    /// <summary>Your EpikChat username (messages from it are ignored). Blank = read from the page header.</summary>
+    public string MyUsername { get; set; } = "";
+    /// <summary>Minimum seconds between two replies typed into chat.</summary>
+    public int ReplyMinIntervalSeconds { get; set; } = 5;
+    /// <summary>Log every parsed chat message to the app log.</summary>
+    public bool DebugLog { get; set; }
     public int CooldownSeconds { get; set; } = 10;
     public int OverlaySeconds { get; set; } = 8;
     public bool ShowOnStream { get; set; } = true;

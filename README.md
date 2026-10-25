@@ -1,4 +1,4 @@
-# EpikStreamer 2.2.1
+# EpikStreamer 2.2.2
 
 Windows desktop app (WPF, .NET 8) that streams local video files to RTMP ingests such as EpikChat's
 **Go live → RTMP encoder** (server `rtmp://media.epikchat.com:1935/x` + your stream key) using ffmpeg.
@@ -7,9 +7,9 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 ## Downloads (GitHub Releases: https://github.com/nano11b/EpikStreamer/releases)
 | Package | Contents |
 |---|---|
-| `EpikStreamer-2.2.1-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
-| `EpikStreamer-v2.2.1-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
-| `EpikStreamer-v2.2.1-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
+| `EpikStreamer-2.2.2-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
+| `EpikStreamer-v2.2.2-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
+| `EpikStreamer-v2.2.2-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
 
 ## Features
 - **Playlist** (Source / Playlist tab): add/drag-drop MP4/MKV/MOV/AVI/WebM…, remove, reorder, loop the whole playlist, shuffle, **⏭ Next** to skip.
@@ -25,7 +25,7 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 ## New in 2.2
 - **Schedule** tab: one-off, daily or weekly streams with start/stop times, a profile and a playlist file. Settings → *Launch at Windows startup* lets the schedule run unattended.
 - **Tray & hotkeys**: minimize/close to the tray, balloon notifications, global hotkeys (Settings tab; defaults Ctrl+Alt+S/N/M/K/O).
-- **Chat commands & alerts** (Settings tab): `!song`, `!uptime`, `!help` and your own `!command = text` lines, shown as an on-stream overlay. Posting replies into chat is **off by default**. New-viewer and milestone alerts appear on stream, with an optional local sound. ⚠ The chat selectors are untested against the live site, and the chat panel must be open.
+- **Chat commands & alerts** (Settings tab): `!song`, `!uptime`, `!help` and your own `!command = text` lines, shown as an on-stream overlay. Posting replies into chat is **off by default**. New-viewer and milestone alerts appear on stream, with an optional local sound. The chat panel must be open (signed in) for commands to be seen. Use **Chat diagnostics** and **debug chat log** if something isn't detected.
 - **Audio** tab: loudness normalization (target LUFS), background music with ducking, microphone mix-in with a noise gate. Music and mic can be muted or adjusted live.
 - **History** tab: per-session stats, a chart and CSV export.
 - **Themes**: Dark, Light, Midnight Blue and Epik Purple (Settings tab), plus a compact always-on-top **mini player** (⧉ Mini).

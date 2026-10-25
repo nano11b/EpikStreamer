@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.2.2 — 2026-10-25
+### Fixed
+- **Chat commands did nothing.** Root cause: the old chat observer guessed generic markup (`[data-message-id]`, `.chat-message`, `.message`, `[class*='message']`, `[role='listitem']`, a `textarea`/placeholder input and a Send button), and none of it exists in EpikChat. EpikChat renders messages in a react-virtuoso list (`div[role="log"][aria-label="Chat messages"]`) whose rows are `[data-chat-message-row="<id>"]` and are constantly re-created while scrolling, so the observer never matched a single message. Its fallback text would also have included the toolbar and the reply quote. On top of that, commands were only handled while a stream was running.
+- New observer, built to EpikChat's actual DOM:
+  - It reads the author (`[data-chat-message-layout]` → first button), bot tag (`[data-chat-tag="bot"]`), time (`time[datetime]`) and message text (the last block). The reply quote, toolbar, buttons and emoji fallbacks are excluded, and emoji become their characters.
+  - System banners are skipped.
+  - Detection uses message IDs, so each message is handled exactly once even when Virtuoso re-renders rows.
+  - When the observer attaches, or when you switch rooms, the existing backlog is marked as seen and never answered. Hidden room panes are ignored.
+  - It never reacts to bots, to its own replies, or to your own username. The username is read from the page, or you can set it.
+- Chat replies (still opt-in) type into the real composer (`input[data-chat-composer-input]`) with DevTools `Input.insertText` + Enter. If that fails, they fall back to setting the value and submitting the form. Replies are truncated to the 250-character limit and rate-limited (default: one every 5 s).
+- Commands now work when you're not live (as an overlay only while live; as chat replies if enabled).
+### Added
+- Settings → Chat commands: **My EpikChat username**, **minimum seconds between replies**, **debug chat log** (logs every message the observer sees), observer status ("attached to Lobby, 44 rows"), and a **Chat diagnostics** button. The button saves a sanitized DOM skeleton plus the observer state (no message text or names) for bug reports.
+- Tests: a headless-Chrome mock of EpikChat's chat DOM (`EpikStreamer.Tests/mock/run-chat-mock.sh`, covering virtualization churn, system banner, reply quote, emoji, bot rows, hidden toolbar, room switch and the composer form) plus a `chatfeed` mode that runs the observed messages through the command handler.
+
 ## 2.2.1 — 2026-10-25
 ### Fixed
 - **The stream failed to start with current ffmpeg builds** (including the BtbN master build bundled with 2.2.0): `Option thread_queue_size … cannot be applied to input url pipe:0`, `Error parsing options for input file pipe:0`, exit code -22. ffmpeg master no longer accepts `-thread_queue_size` as an input option. EpikStreamer now omits it when the build rejects it (both for the main `pipe:0` input and the background-music input).
