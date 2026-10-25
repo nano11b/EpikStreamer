@@ -16,13 +16,23 @@ public static class CommandBuilder
                               double MusicVolume = 0.25, double MicVolume = 1.0, double MainVolume = 1.0);
 
     /// <summary>Input args for the mic. "lavfi:&lt;graph&gt;" is a test hook; anything else is a dshow device name.</summary>
-    public static List<string> MicInputArgs(string device) => device.StartsWith("lavfi:", StringComparison.Ordinal)
-        ? new() { "-f", "lavfi", "-i", device[6..] }
-        : new() { "-f", "dshow", "-audio_buffer_size", "50", "-i", "audio=" + device };
+    public static List<string> MicInputArgs(string device, FfmpegCaps? caps = null)
+    {
+        if (device.StartsWith("lavfi:", StringComparison.Ordinal)) return new() { "-f", "lavfi", "-i", device[6..] };
+        var a = new List<string> { "-f", "dshow" };
+        if ((caps ?? FfmpegCaps.All).DshowBufferSize) a.AddRange(new[] { "-audio_buffer_size", "50" });
+        a.AddRange(new[] { "-i", "audio=" + device });
+        return a;
+    }
 
     /// <summary>Input args for the music feed: raw PCM the engine pushes over a local TCP socket.</summary>
-    public static List<string> MusicInputArgs(int port) => new()
-        { "-thread_queue_size", "64", "-f", "s16le", "-ar", "48000", "-ac", "2", "-i", $"tcp://127.0.0.1:{port}?listen=1&listen_timeout=20000" };
+    public static List<string> MusicInputArgs(int port, FfmpegCaps? caps = null)
+    {
+        var a = new List<string>();
+        if ((caps ?? FfmpegCaps.All).InputThreadQueue) a.AddRange(new[] { "-thread_queue_size", "64" });
+        a.AddRange(new[] { "-f", "s16le", "-ar", "48000", "-ac", "2", "-i", $"tcp://127.0.0.1:{port}?listen=1&listen_timeout=20000" });
+        return a;
+    }
 
     /// <summary>Feeder for one music file: decode → raw s16le 48k stereo on stdout, unthrottled (TCP backpressure paces it).</summary>
     public static List<string> MusicFeederArgs(string file) => new()
@@ -31,16 +41,17 @@ public static class CommandBuilder
     static string V(double v) => v.ToString("0.###", Inv);
 
     /// <summary>Audio chain: main [+ mic] → (sidechain) → [+ music, ducked] → normalization → 44.1k.</summary>
-    public static List<string> AudioGraph(Profile p, LiveOptions? lo, int musicIdx, int micIdx)
+    public static List<string> AudioGraph(Profile p, LiveOptions? lo, int musicIdx, int micIdx, FfmpegCaps? caps = null)
     {
+        var c = caps ?? FfmpegCaps.All;
         var a = p.Audio; var f = new List<string>();
-        var zmq = lo is { ControlPort: > 0 } ? $"azmq=bind_address=tcp\\\\://127.0.0.1\\\\:{lo.ControlPort}," : "";
+        var zmq = lo is { ControlPort: > 0 } && c.HasFilter("azmq") ? $"azmq=bind_address=tcp\\\\://127.0.0.1\\\\:{lo.ControlPort}," : "";
         double mainVol = lo?.MainVolume ?? a.MainVolume;
         f.Add($"[0:a]{zmq}asetpts=PTS-STARTPTS,aresample=48000:async=1000:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,volume@main={V(mainVol)}[am]");
         string voice = "[am]";
         if (micIdx >= 0)
         {
-            var gate = a.MicNoiseGate ? $"agate@gate=threshold={V(Math.Clamp(a.GateThreshold, 0.0001, 1))}:ratio=4:attack=5:release=200," : "";
+            var gate = a.MicNoiseGate && c.HasFilter("agate") ? $"agate@gate=threshold={V(Math.Clamp(a.GateThreshold, 0.0001, 1))}:ratio=4:attack=5:release=200," : "";
             f.Add($"[{micIdx}:a]aresample=48000:async=1000,aformat=sample_fmts=fltp:channel_layouts=stereo,{gate}volume@mic={V(lo?.MicVolume ?? a.MicVolume)}[amic]");
             f.Add("[am][amic]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[avo]"); voice = "[avo]";
         }
@@ -49,7 +60,7 @@ public static class CommandBuilder
         {
             f.Add($"[{musicIdx}:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume@music={V(lo?.MusicVolume ?? a.MusicVolume)}[amu]");
             string mu = "[amu]";
-            if (a.Ducking)
+            if (a.Ducking && c.HasFilter("sidechaincompress"))
             {
                 f.Add($"{voice}asplit=2[avm][asc]"); voice = "[avm]";
                 f.Add($"[amu][asc]sidechaincompress@duck=threshold={V(Math.Clamp(a.DuckThreshold, 0.001, 1))}:ratio={V(Math.Clamp(a.DuckRatio, 1, 20))}:attack=20:release=500[amd]"); mu = "[amd]";
@@ -58,8 +69,8 @@ public static class CommandBuilder
         }
         var norm = a.Normalize switch
         {
-            "Loudnorm" => $"loudnorm=I={V(Math.Clamp(a.TargetLufs, -70, -5))}:TP=-1.5:LRA=11,",
-            "Dynaudnorm" => "dynaudnorm=f=250:g=15:p=0.9,",
+            "Loudnorm" when c.HasFilter("loudnorm") => $"loudnorm=I={V(Math.Clamp(a.TargetLufs, -70, -5))}:TP=-1.5:LRA=11,",
+            "Dynaudnorm" when c.HasFilter("dynaudnorm") => "dynaudnorm=f=250:g=15:p=0.9,",
             _ => "",
         };
         f.Add($"{mix}{norm}aresample=44100[aout]");
@@ -174,7 +185,7 @@ public static class CommandBuilder
         return args;
     }
 
-    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1)
+    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1, FfmpegCaps? caps = null)
     {
         var o = p.Overlays; var f = new List<string>(); string cur = "[v0]";
         f.Add($"[0:v]setpts=PTS-STARTPTS,fps={p.Fps}[v0]");  // timestamp based: robust to partial (skipped) segments
@@ -211,12 +222,13 @@ public static class CommandBuilder
         f.Add($"{cur}split=2[vs][pvs]");
         f.Add($"[vs]format={PixFmt(p.Encoder)}[vout]");
         f.Add("[pvs]fps=1,scale=320:-2,format=yuvj420p[pv]");
-        f.AddRange(AudioGraph(p, lo, musicIdx, micIdx));
+        f.AddRange(AudioGraph(p, lo, musicIdx, micIdx, caps));
         return string.Join(";", f);
     }
 
-    public static List<string> VideoEncoderArgs(Profile p)
+    public static List<string> VideoEncoderArgs(Profile p, FfmpegCaps? caps = null)
     {
+        var c = caps ?? FfmpegCaps.All;
         string v = p.VideoKbps + "k", max = p.VideoKbps + "k", buf = (p.VideoKbps * 2) + "k", g = (p.Fps * Math.Max(1, p.KeyframeSeconds)).ToString();
         var a = p.Encoder switch
         {
@@ -225,6 +237,10 @@ public static class CommandBuilder
             "h264_amf" => new List<string> { "-c:v", "h264_amf", "-usage", "lowlatency", "-quality", "speed", "-rc", "cbr" },
             _ => new List<string> { "-c:v", "libx264", "-preset", "veryfast", "-sc_threshold", "0" },
         };
+        // drop encoder-private options this build doesn't know (they were renamed/removed across AMF/NVENC/QSV versions)
+        var enc = a[1];
+        for (int i = 2; i + 1 < a.Count;)
+            if (!c.EncoderHas(enc, a[i].TrimStart('-').Split(':')[0]) && a[i] != "-profile:v") a.RemoveRange(i, 2); else i += 2;
         a.AddRange(new[] { "-b:v", v, "-maxrate", max, "-bufsize", buf, "-g", g, "-keyint_min", g, "-r", p.Fps.ToString() });
         return a;
     }
@@ -240,29 +256,36 @@ public static class CommandBuilder
         return sb.ToString();
     }
 
-    public static string TeeSpec(IReadOnlyList<Destination> dests) => string.Join("|", dests.Select(d => d.IsRecording
+    public static string TeeSpec(IReadOnlyList<Destination> dests, FfmpegCaps? caps = null) => string.Join("|", dests.Select(d => d.IsRecording
         ? "[f=matroska:onfail=ignore]" + TeeEscape(d.Target.Replace('\\', '/'))
-        : "[f=flv:onfail=ignore:flvflags=no_duration_filesize]" + TeeEscape(d.Target)));
+        : ((caps ?? FfmpegCaps.All).FlvFlags ? "[f=flv:onfail=ignore:flvflags=no_duration_filesize]" : "[f=flv:onfail=ignore]") + TeeEscape(d.Target)));
 
     /// <summary>Long-lived encoder: reads continuous MPEG-TS on stdin, applies overlays, sends FLV to every destination
     /// (tee muxer, a failing destination does not stop the others) + optional MKV recording + preview JPEG.</summary>
-    public static List<string> EncoderArgs(Profile p, IReadOnlyList<Destination> dests, bool hasLogo, LiveOptions? lo = null)
+    public static List<string> EncoderArgs(Profile p, IReadOnlyList<Destination> dests, bool hasLogo, LiveOptions? lo = null, FfmpegCaps? caps = null)
     {
-        var a = new List<string> { "-hide_banner", "-y", "-nostats", "-progress", "pipe:1", "-stats_period", "1",
-            "-thread_queue_size", "1024", "-reinit_filter", "0", "-re", "-f", "mpegts", "-i", "pipe:0" };
+        var c = caps ?? FfmpegCaps.All;
+        // global options first, then each input's own options immediately before its -i (ffmpeg master rejects misplaced ones)
+        var a = new List<string> { "-hide_banner", "-y", "-nostats", "-progress", "pipe:1" };
+        if (c.StatsPeriod) a.AddRange(new[] { "-stats_period", "1" });
+        if (c.InputThreadQueue) a.AddRange(new[] { "-thread_queue_size", "1024" });
+        if (c.ReinitFilter) a.AddRange(new[] { "-reinit_filter", "0" });
+        a.AddRange(new[] { "-re", "-f", "mpegts", "-i", "pipe:0" });
         int next = 1;
         if (hasLogo) { a.Add("-i"); a.Add(p.Overlays.ImagePath); next++; }
         int musicIdx = -1, micIdx = -1;
-        if (lo is { MusicPort: > 0 }) { a.AddRange(MusicInputArgs(lo.MusicPort)); musicIdx = next++; }
-        if (!string.IsNullOrWhiteSpace(lo?.MicDevice)) { a.AddRange(MicInputArgs(lo.MicDevice!)); micIdx = next++; }
-        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx), "-map", "[vout]", "-map", "[aout]" });
-        a.AddRange(VideoEncoderArgs(p));
+        if (lo is { MusicPort: > 0 }) { a.AddRange(MusicInputArgs(lo.MusicPort, c)); musicIdx = next++; }
+        if (!string.IsNullOrWhiteSpace(lo?.MicDevice)) { a.AddRange(MicInputArgs(lo.MicDevice!, c)); micIdx = next++; }
+        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx, c), "-map", "[vout]", "-map", "[aout]" });
+        a.AddRange(VideoEncoderArgs(p, c));
         a.AddRange(new[] { "-c:a", "aac", "-b:a", p.AudioKbps + "k", "-ar", "44100", "-ac", "2" });
         if (dests.Count == 1 && !dests[0].IsRecording)
-            a.AddRange(new[] { "-f", "flv", "-flvflags", "no_duration_filesize", dests[0].Target });
+            a.AddRange(c.FlvFlags ? new[] { "-f", "flv", "-flvflags", "no_duration_filesize", dests[0].Target } : new[] { "-f", "flv", dests[0].Target });
         else
-            a.AddRange(new[] { "-flags", "+global_header", "-f", "tee", TeeSpec(dests) });
-        a.AddRange(new[] { "-map", "[pv]", "-c:v", "mjpeg", "-q:v", "5", "-f", "image2", "-update", "1", "-atomic_writing", "1", PreviewFile });
+            a.AddRange(new[] { "-flags", "+global_header", "-f", "tee", TeeSpec(dests, c) });
+        a.AddRange(new[] { "-map", "[pv]", "-c:v", "mjpeg", "-q:v", "5", "-f", "image2", "-update", "1" });
+        if (c.AtomicWriting) a.AddRange(new[] { "-atomic_writing", "1" });
+        a.Add(PreviewFile);
         return a;
     }
 

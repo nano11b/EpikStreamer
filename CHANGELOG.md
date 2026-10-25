@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.2.1 — 2026-10-25
+### Fixed
+- **The stream failed to start with current ffmpeg builds** (including the BtbN master build bundled with 2.2.0): `Option thread_queue_size … cannot be applied to input url pipe:0`, `Error parsing options for input file pipe:0`, exit code -22. ffmpeg master no longer accepts `-thread_queue_size` as an input option. EpikStreamer now omits it when the build rejects it (both for the main `pipe:0` input and the background-music input).
+- When ffmpeg rejects the command line (an option, filter or parse error before any output), the reconnect retries are no longer used up. The stream stops with a clear error that shows the ffmpeg line responsible.
+### Added
+- **ffmpeg capability probe**, run once per ffmpeg binary and cached: version, input `-thread_queue_size`, `-reinit_filter`, `-stats_period`, image2 `atomic_writing`, `flvflags`, dshow `audio_buffer_size`, the filter list (azmq, loudnorm, dynaudnorm, sidechaincompress, agate, …), the encoder list and the encoder-private options for AMF/NVENC/QSV/x264. Version-sensitive options are only emitted when the build supports them. Missing features are logged; for example, without azmq the live mute/volume controls are disabled with a notice instead of breaking the stream.
+- Encoder auto-detect skips encoders that aren't compiled into the build.
+- Tests now run against both the system ffmpeg (7.1) and the BtbN `ffmpeg-master-latest` build (`FFMPEG=… dotnet EpikStreamer.Tests.dll <mode>`), plus a `caps` test mode and a `fatal` test mode.
+### Notes
+- The `[in#0] UDTA parsing failed retrying raw` and `stream 0, timescale not set` source messages are harmless metadata warnings from the input file.
+- Overlay fonts and text files are passed as relative names on purpose. ffmpeg runs with its working directory set to the overlay folder, so Windows drive-letter colons never need filtergraph escaping.
+
 ## 2.2.0 — 2026-10-25
 ### Added
 - **Scheduling** (Schedule tab): one-off, daily or weekly entries with a start time, an optional stop time (past midnight is fine), a profile and an optional `.m3u`/`.txt` playlist. Missed starts within 2 minutes still fire. Each occurrence fires only once. Optional **launch at Windows startup** (per-user `Run` key, optionally minimized to the tray).

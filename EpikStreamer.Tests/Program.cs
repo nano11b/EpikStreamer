@@ -6,6 +6,7 @@ using EpikStreamer.Core;
 var dir = "/tmp/epiktest"; Directory.CreateDirectory(dir);
 var mode = args.Length > 0 ? args[0] : "unit";
 int fails = 0;
+var FF = Environment.GetEnvironmentVariable("FFMPEG") ?? "/usr/bin/ffmpeg";
 void Check(bool ok, string what) { Console.WriteLine((ok ? "PASS " : "FAIL ") + what); if (!ok) fails++; }
 
 Profile MakeProfile()
@@ -20,6 +21,37 @@ Profile MakeProfile()
     return p;
 }
 
+if (mode == "caps")
+{
+    var c = FfmpegCaps.Probe(FF);
+    Console.WriteLine("caps: " + c.Describe());
+    Check(c.Version.StartsWith("ffmpeg version"), "probe reads version");
+    Check(ReferenceEquals(c, FfmpegCaps.Probe(FF)), "probe is cached per binary");
+    Check(c.HasFilter("drawtext") && c.HasFilter("xfade") && c.HasEncoder("libx264"), "filters/encoders parsed");
+    if (Environment.GetEnvironmentVariable("EXPECT_NO_TQ") == "1") Check(!c.InputThreadQueue, "master: input -thread_queue_size detected as unsupported");
+    var pr = MakeProfile();
+    var args0 = CommandBuilder.EncoderArgs(pr, new List<CommandBuilder.Destination> { new("x", "rtmp://h/x/K") }, true, new(5555, 6666, "lavfi:sine", true), c);
+    Check(c.InputThreadQueue == args0.Contains("-thread_queue_size"), "-thread_queue_size emitted only when accepted");
+    int iPipe = args0.IndexOf("pipe:0");
+    Check(args0.IndexOf("-progress") < iPipe && args0[iPipe - 1] == "-i" && args0[iPipe - 2] == "mpegts" && args0[iPipe - 4] == "-re", "pipe input options directly precede -i pipe:0");
+    var amf = new Profile { Encoder = "h264_amf" };
+    var fakeAmf = new FfmpegCaps { EncoderOptions = new() { ["h264_amf"] = new() { "usage", "rc" } } };
+    var va = string.Join(" ", CommandBuilder.VideoEncoderArgs(amf, fakeAmf));
+    Check(va.Contains("-usage lowlatency") && va.Contains("-rc cbr") && !va.Contains("-quality"), "unknown encoder-private option dropped: " + va);
+    var noFlv = new FfmpegCaps { FlvFlags = false, AtomicWriting = false, StatsPeriod = false, ReinitFilter = false, InputThreadQueue = false, Filters = new() { "drawtext" } };
+    var na = string.Join(" ", CommandBuilder.EncoderArgs(pr, new List<CommandBuilder.Destination> { new("x", "rtmp://h/x/K"), new("r", "/tmp/r.mkv", true) }, true, new(5555, 6666, null, true), noFlv));
+    Check(!na.Contains("flvflags") && !na.Contains("atomic_writing") && !na.Contains("stats_period") && !na.Contains("reinit_filter") && !na.Contains("azmq") && !na.Contains("thread_queue"), "gated options/filters omitted");
+    // the user's exact lines
+    var userErr = "Option thread_queue_size (set the maximum number of queued packets per stream on the muxer) cannot be applied to input url pipe:0 -- you are trying to apply an input option to an output file or vice versa. Move this option before the file it belongs to.";
+    Check(StreamEngine.OptionError.IsMatch(userErr) && StreamEngine.OptionError.IsMatch("Error parsing options for input file pipe:0.") && StreamEngine.OptionError.IsMatch("Error opening input files: Invalid argument"), "option errors recognised");
+    Check(!StreamEngine.OptionError.IsMatch("[in#0 @ 0000011a9e30f440] UDTA parsing failed retrying raw") && !StreamEngine.OptionError.IsMatch("stream 0, timescale not set")
+          && !StreamEngine.OptionError.IsMatch("[tcp @ 0x1] Connection to tcp://h:1935 failed: Connection refused") && !StreamEngine.OptionError.IsMatch("Error opening output rtmp://h/x/K: Input/output error"), "harmless/network lines not fatal");
+    Check(StreamEngine.IsFatalOptionError(-22, false, userErr) && !StreamEngine.IsFatalOptionError(-22, true, userErr) && !StreamEngine.IsFatalOptionError(1, false, null), "fatal only before progress");
+    // auto-detect test encode (FfmpegLocator) works with this build
+    Check((await FfmpegLocator.DetectEncodersAsync(FF)).Contains("libx264"), "encoder auto-detect test-encode runs");
+    Console.WriteLine(fails == 0 ? "CAPS TESTS PASSED" : $"{fails} FAILED");
+    return fails;
+}
 if (mode == "helperjs") { Console.Write(EpikStreamer.EpikChatAutomation.HelperJs); return 0; }
 if (mode == "steps") { Console.Write(System.Text.Json.JsonSerializer.Serialize(EpikStreamer.EpikChatAutomation.Steps(args.Length > 1 ? args[1] : "Public"))); return 0; }
 if (mode == "chatjs") { Console.Write(EpikStreamer.EpikChatAutomation.ObserverJs(true)); return 0; }
@@ -210,7 +242,8 @@ var destinations = new List<CommandBuilder.Destination>
     new("File B", $"{dir}/outB.flv"),
     new("Unreachable", "rtmp://127.0.0.1:1935/x/SECRET|KEY"),
 };
-var eng = new StreamEngine(prof, "/usr/bin/ffmpeg", destinations, new[] { "SECRET|KEY" }, $"{dir}/work");
+if (mode == "fatal") prof.MaxRetries = 4;
+var eng = new StreamEngine(prof, FF, destinations, new[] { "SECRET|KEY" }, $"{dir}/work");
 var logAll = new StringBuilder();
 eng.TextOverlays = mode == "audio";
 eng.Log += s => { logAll.AppendLine(s); if (!s.StartsWith("> ") && !s.Contains("Changing video frame") && !s.Contains("filter context")) Console.WriteLine("LOG " + s); };
@@ -252,6 +285,16 @@ else if (mode == "drop")
 {
     At(8, eng.SimulateDrop, "DROP");
     At(22, eng.Stop, "STOP");
+}
+if (mode == "fatal")
+{
+    string? lastState = null; eng.State += s => lastState = s;
+    Check(eng.Wait(15000), "engine gave up quickly on an option error");
+    var la = logAll.ToString();
+    Check(la.Contains("rejected the command line") && !la.Contains("Reconnecting in"), "no reconnect retries burned");
+    Check(lastState?.Contains("cannot be applied to input url pipe:0") == true, "state shows the ffmpeg line: " + lastState);
+    Console.WriteLine(fails == 0 ? "ENGINE TEST PASSED" : $"{fails} FAILED");
+    return fails;
 }
 Check(eng.Wait(20000), "engine stopped");
 Check(!logAll.ToString().Contains("SECRET") && !logAll.ToString().Contains("KEY"), "no stream key in logs");

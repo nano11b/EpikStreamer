@@ -1,4 +1,4 @@
-# EpikStreamer 2.2.0
+# EpikStreamer 2.2.1
 
 Windows desktop app (WPF, .NET 8) that streams local video files to RTMP ingests such as EpikChat's
 **Go live → RTMP encoder** (server `rtmp://media.epikchat.com:1935/x` + your stream key) using ffmpeg.
@@ -7,9 +7,9 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 ## Downloads (GitHub Releases: https://github.com/nano11b/EpikStreamer/releases)
 | Package | Contents |
 |---|---|
-| `EpikStreamer-2.2.0-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
-| `EpikStreamer-v2.2.0-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
-| `EpikStreamer-v2.2.0-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
+| `EpikStreamer-2.2.1-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
+| `EpikStreamer-v2.2.1-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
+| `EpikStreamer-v2.2.1-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
 
 ## Features
 - **Playlist** (Source / Playlist tab): add/drag-drop MP4/MKV/MOV/AVI/WebM…, remove, reorder, loop the whole playlist, shuffle, **⏭ Next** to skip.

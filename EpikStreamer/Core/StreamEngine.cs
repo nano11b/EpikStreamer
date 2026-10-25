@@ -110,24 +110,8 @@ public sealed class StreamEngine
     public bool HasMusic => MusicActive;
     public bool HasMic => MicActive;
 
-    static readonly Dictionary<string, bool> _azmqCache = new();
     /// <summary>True if this ffmpeg build has the azmq filter (BtbN/gyan builds do).</summary>
-    public static bool SupportsAzmq(string ffmpeg)
-    {
-        lock (_azmqCache)
-        {
-            if (_azmqCache.TryGetValue(ffmpeg, out var b)) return b;
-            try
-            {
-                var psi = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-                psi.ArgumentList.Add("-hide_banner"); psi.ArgumentList.Add("-filters");
-                using var pr = Process.Start(psi)!; var o = pr.StandardOutput.ReadToEnd(); pr.WaitForExit(5000);
-                b = Regex.IsMatch(o, @"\sazmq\s");
-            }
-            catch { b = false; }
-            return _azmqCache[ffmpeg] = b;
-        }
-    }
+    public static bool SupportsAzmq(string ffmpeg) => FfmpegCaps.Probe(ffmpeg).HasFilter("azmq");
 
     bool Ctl(string target, string cmd, string arg)
     {
@@ -278,6 +262,15 @@ public sealed class StreamEngine
                 // encoder died unexpectedly (connection dropped, server closed, every destination failed, ...)
                 KillFeeder();
                 try { _enc?.WaitForExit(3000); Emit($"Encoder exited unexpectedly (code {SafeExit(_enc)})."); } catch { }
+                int? code = null; try { if (_enc is { HasExited: true }) code = _enc.ExitCode; } catch { }
+                if (!_stop && IsFatalOptionError(code, _encProgress, _encFatal))
+                {
+                    var line = CommandBuilder.Mask(_encFatal!, _secrets);
+                    Emit("✖ ffmpeg rejected the command line, not retrying: " + line);
+                    Emit("  Your ffmpeg: " + FfmpegCaps.Probe(_ffmpeg).Describe() + ". Try the bundled ffmpeg (Output tab → Download ffmpeg) or report this line.");
+                    State?.Invoke("Error: ffmpeg rejected the command — " + line);
+                    break;
+                }
                 ComputeResume();
                 if ((DateTime.UtcNow - encStart).TotalSeconds > 60) attempt = 0;
                 attempt++;
@@ -303,6 +296,18 @@ public sealed class StreamEngine
         }
     }
 
+    bool _capsLogged;
+    volatile bool _encProgress; volatile string? _encFatal;
+    /// <summary>ffmpeg lines that mean the command line itself is wrong (retrying can't help).</summary>
+    public static readonly Regex OptionError = new(
+        @"Error parsing options|cannot be applied to input url|cannot be applied to output url|Unrecognized option|Option not found|Error splitting the argument list|" +
+        @"Error parsing (a )?filter|No such filter|Error initializing (complex )?filters?|Error binding filtergraph|Invalid argument.*filter|" +
+        @"Error reinitializing filters|Unknown encoder|Undefined constant or missing|Option .* not found|Error applying option|Error opening input files: Invalid argument|Unknown input format",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    /// <summary>True if the encoder died before producing any output with a command-line/option error (exit -22 = EINVAL).</summary>
+    public static bool IsFatalOptionError(int? exitCode, bool hadProgress, string? errLine) =>
+        !hadProgress && errLine != null && exitCode != 0;
+
     static string SafeExit(Process? p) { try { return p?.ExitCode.ToString() ?? "?"; } catch { return "?"; } }
 
     static readonly Regex SlaveFailed = new(@"Slave muxer #(\d+) failed: (.*?)(, continuing with|$)", RegexOptions.Compiled);
@@ -319,12 +324,19 @@ public sealed class StreamEngine
             Recordings.Add(path); Emit("● Recording to " + path);
         }
         var a = _p.Audio;
-        int ctlPort = RuntimeControl && SupportsAzmq(_ffmpeg) ? StreamControl.FreePort() : 0;
+        var caps = FfmpegCaps.Probe(_ffmpeg);
+        if (!_capsLogged)
+        {
+            _capsLogged = true; Emit("ffmpeg: " + caps.Describe());
+            if (RuntimeControl && !caps.HasFilter("azmq")) Emit("⚠ This ffmpeg build has no azmq filter: live mute/volume/overlay toggles are disabled (they apply on the next start).");
+            if (a.Normalize != "Off" && !caps.HasFilter(a.Normalize.ToLowerInvariant())) Emit($"⚠ {a.Normalize} filter missing in this ffmpeg build: normalization disabled.");
+        }
+        int ctlPort = RuntimeControl && caps.HasFilter("azmq") ? StreamControl.FreePort() : 0;
         int musicPort = MusicActive ? StreamControl.FreePort() : 0;
         var lo = new CommandBuilder.LiveOptions(ctlPort, musicPort, MicActive ? a.MicDevice : null, TextOverlays,
             MusicMuted ? 0 : a.MusicVolume, MicMuted ? 0 : a.MicVolume, a.MainVolume);
         _ctl?.Dispose(); _ctl = ctlPort > 0 ? new StreamControl(ctlPort) : null;
-        var args = CommandBuilder.EncoderArgs(_p, dests, hasLogo, lo);
+        var args = CommandBuilder.EncoderArgs(_p, dests, hasLogo, lo, caps);
         Emit("> ffmpeg " + CommandBuilder.Display(args, _secrets));
         var psi = new ProcessStartInfo(_ffmpeg)
         {
@@ -335,6 +347,7 @@ public sealed class StreamEngine
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
         var kv = new Dictionary<string, string>();
         var failed = new HashSet<int>(); bool anyLive = false;
+        _encProgress = false; _encFatal = null;
         for (int i = 0; i < _netDests.Count; i++) DestinationStatus?.Invoke(i, DestState.Connecting, "");
         p.OutputDataReceived += (_, e) =>
         {
@@ -344,7 +357,7 @@ public sealed class StreamEngine
             kv[k] = v;
             if (k == "progress")
             {
-                _lastProgress = DateTime.UtcNow;
+                _lastProgress = DateTime.UtcNow; _encProgress = true;
                 _outTime = D(kv, "out_time_us") / 1e6;
                 if (!anyLive && _outTime > 0.5)
                 {   // the muxer is writing => every destination that hasn't failed is connected
@@ -358,6 +371,7 @@ public sealed class StreamEngine
         {
             if (e.Data == null) return;
             Emit(e.Data);
+            if (!_encProgress && _encFatal == null && OptionError.IsMatch(e.Data)) _encFatal = e.Data.Trim();
             var m = SlaveFailed.Match(e.Data);
             if (m.Success && int.TryParse(m.Groups[1].Value, out var idx))
             {

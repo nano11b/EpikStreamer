@@ -82,8 +82,10 @@ public static class FfmpegLocator
     public static async Task<List<string>> DetectEncodersAsync(string ffmpeg)
     {
         var ok = new List<string>();
+        var caps = await Task.Run(() => FfmpegCaps.Probe(ffmpeg));
         foreach (var (id, _) in Encoders)
         {
+            if (!caps.HasEncoder(id)) continue;   // not compiled into this build: skip the 15 s test
             var psi = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
             foreach (var a in new[] { "-hide_banner", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=640x360:r=30", "-t", "0.5",
                                       "-pix_fmt", CommandBuilder.PixFmt(id), "-c:v", id, "-f", "null", "-" }) psi.ArgumentList.Add(a);
