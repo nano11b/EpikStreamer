@@ -105,13 +105,19 @@ public class Profile
 
 public static class Secret
 {
+    /// <summary>Non-Windows secret store (Linux: libsecret / AES file). Windows always uses DPAPI and ignores these.</summary>
+    public static Func<string, string?>? PlatformProtect { get; set; }
+    public static Func<string, string>? PlatformUnprotect { get; set; }
+
     public static string? Protect(string s)
     {
+        if (!string.IsNullOrEmpty(s) && !OperatingSystem.IsWindows() && PlatformProtect != null) return PlatformProtect(s);
         if (string.IsNullOrEmpty(s) || !OperatingSystem.IsWindows()) return null;
         return Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(s), null, DataProtectionScope.CurrentUser));
     }
     public static string Unprotect(string? b64)
     {
+        if (!string.IsNullOrEmpty(b64) && !OperatingSystem.IsWindows() && PlatformUnprotect != null) return PlatformUnprotect(b64);
         if (string.IsNullOrEmpty(b64) || !OperatingSystem.IsWindows()) return "";
         try { return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(b64), null, DataProtectionScope.CurrentUser)); }
         catch { return ""; }
@@ -206,4 +212,10 @@ public class ProfileStore
         File.WriteAllText(tmp, JsonSerializer.Serialize(this, Json));
         File.Move(tmp, FilePath, true);
     }
+}
+
+/// <summary>Which platform's ffmpeg devices / encoders / update packages to target. Defaults to the running OS; tests can flip it.</summary>
+public static class Os
+{
+    public static bool Windows { get; set; } = OperatingSystem.IsWindows();
 }

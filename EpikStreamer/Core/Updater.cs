@@ -79,7 +79,8 @@ public static class Updater
             foreach (var a in assets.EnumerateArray())
             {
                 var n = a.GetProperty("name").GetString() ?? ""; var u = a.GetProperty("browser_download_url").GetString() ?? "";
-                if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && n.Contains("setup", StringComparison.OrdinalIgnoreCase)) { exe = u; exeName = n; }
+                if (Os.Windows ? n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && n.Contains("setup", StringComparison.OrdinalIgnoreCase)
+                                                : n.EndsWith($"_{LinuxArch}.deb", StringComparison.OrdinalIgnoreCase)) { exe = u; exeName = n; }
             }
             foreach (var a in assets.EnumerateArray())
             {
@@ -110,10 +111,26 @@ public static class Updater
         var r = doc.RootElement;
         string Get(string k) => r.TryGetProperty(k, out var v) ? v.GetString() ?? "" : "";
         var sha = Get("sha256").Trim().ToLowerInvariant();
+        var url = Get("url");
+        // v2.4+: { "linux": { "amd64": { "url", "sha256" }, "arm64": {...} } } — older Windows clients ignore this key
+        if (!Os.Windows)
+        {
+            if (!r.TryGetProperty("linux", out var lx) || !lx.TryGetProperty(LinuxArch, out var e))
+                throw new InvalidOperationException($"This release has no Linux ({LinuxArch}) package.");
+            url = e.TryGetProperty("url", out var lu) ? lu.GetString() ?? "" : "";
+            sha = (e.TryGetProperty("sha256", out var ls) ? ls.GetString() ?? "" : "").Trim().ToLowerInvariant();
+        }
         if (sha.Length != 64 || !sha.All(Uri.IsHexDigit)) throw new InvalidOperationException("Manifest has no valid sha256.");
-        var url = Get("url"); RequireSafe(url);
+        RequireSafe(url);
         return new UpdateInfo(ParseVersion(Get("version")), url, sha, Get("notes"));
     }
+
+    /// <summary>Debian architecture name of this process (amd64 / arm64).</summary>
+    public static string LinuxArch => System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+    {
+        System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+        _ => "amd64",
+    };
 
     public static async Task<UpdateInfo?> CheckAsync(string manifestUrl, CancellationToken ct = default)
     {
@@ -127,7 +144,9 @@ public static class Updater
         RequireSafe(info.Url);
         var dir = Path.Combine(Path.GetTempPath(), "EpikStreamer-update"); Directory.CreateDirectory(dir);
         var name = Path.GetFileName(new Uri(info.Url).LocalPath);
-        if (string.IsNullOrWhiteSpace(name) || !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = $"EpikStreamer-{info.Version}-setup.exe";
+        var ext = Os.Windows ? ".exe" : ".deb";
+        if (string.IsNullOrWhiteSpace(name) || !name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            name = Os.Windows ? $"EpikStreamer-{info.Version}-setup.exe" : $"epikstreamer_{info.Version.ToString(3)}_{LinuxArch}.deb";
         var path = Path.Combine(dir, name);
         using (var http = NewClient())
         using (var resp = await http.GetAsync(info.Url, HttpCompletionOption.ResponseHeadersRead, ct))

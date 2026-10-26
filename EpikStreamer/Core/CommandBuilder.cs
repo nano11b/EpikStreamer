@@ -19,6 +19,11 @@ public static class CommandBuilder
     public static List<string> MicInputArgs(string device, FfmpegCaps? caps = null)
     {
         if (device.StartsWith("lavfi:", StringComparison.Ordinal)) return new() { "-f", "lavfi", "-i", device[6..] };
+        if (!Os.Windows)   // Linux: PulseAudio / PipeWire-pulse source name ("default" = system default)
+        {
+            if (device.StartsWith("alsa:", StringComparison.Ordinal)) return new() { "-f", "alsa", "-i", device[5..] };
+            return new() { "-f", "pulse", "-fragment_size", "4096", "-i", device };
+        }
         var a = new List<string> { "-f", "dshow" };
         if ((caps ?? FfmpegCaps.All).DshowBufferSize) a.AddRange(new[] { "-audio_buffer_size", "50" });
         a.AddRange(new[] { "-i", "audio=" + device });
@@ -93,7 +98,23 @@ public static class CommandBuilder
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "arial.ttf")
         : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 
-    public static string PixFmt(string encoder) => encoder == "h264_qsv" ? "nv12" : "yuv420p";
+    public static string PixFmt(string encoder) => encoder is "h264_qsv" or "h264_vaapi" ? "nv12" : "yuv420p";
+
+    /// <summary>VAAPI render node: $EPIK_VAAPI_DEVICE, else the first /dev/dri/renderD*.</summary>
+    public static string VaapiDevice()
+    {
+        var env = Environment.GetEnvironmentVariable("EPIK_VAAPI_DEVICE");
+        if (!string.IsNullOrWhiteSpace(env)) return env;
+        try { var d = Directory.GetFiles("/dev/dri", "renderD*").OrderBy(x => x, StringComparer.Ordinal).FirstOrDefault(); if (d != null) return d; } catch { }
+        return "/dev/dri/renderD128";
+    }
+
+    /// <summary>Global args a hardware encoder needs before the inputs (VAAPI: device + filter device for hwupload).</summary>
+    public static List<string> HwInitArgs(string encoder) => encoder == "h264_vaapi"
+        ? new() { "-init_hw_device", "vaapi=va:" + VaapiDevice(), "-filter_hw_device", "va" } : new();
+
+    /// <summary>Final video filter for the encoder's input.</summary>
+    public static string EncoderFormat(string encoder) => "format=" + PixFmt(encoder) + (encoder == "h264_vaapi" ? ",hwupload" : "");
 
     public static string Color(string c)
     {
@@ -226,7 +247,7 @@ public static class CommandBuilder
             f.Add($"{cur}drawtext@alert=fontfile={FontName}:textfile={AlertFile}:reload=1:expansion=none:fontsize={Math.Max(20, p.Height / 16)}:fontcolor=yellow:x=(w-tw)/2:y=h/8:borderw=3:bordercolor=0x000000:box=1:boxcolor=0x4B0082@0.7:boxborderw=16{nx}"); cur = nx;
         }
         f.Add($"{cur}split=2[vs][pvs]");
-        f.Add($"[vs]format={PixFmt(p.Encoder)}[vout]");
+        f.Add($"[vs]{EncoderFormat(p.Encoder)}[vout]");
         f.Add("[pvs]fps=1,scale=320:-2,format=yuvj420p[pv]");
         f.AddRange(AudioGraph(p, lo, musicIdx, micIdx, caps));
         return string.Join(";", f);
@@ -240,6 +261,7 @@ public static class CommandBuilder
         {
             "h264_nvenc" => new List<string> { "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr", "-profile:v", "high" },
             "h264_qsv" => new List<string> { "-c:v", "h264_qsv", "-preset", "veryfast", "-profile:v", "high" },
+            "h264_vaapi" => new List<string> { "-c:v", "h264_vaapi", "-rc_mode", "CBR", "-profile:v", "high" },
             "h264_amf" => new List<string> { "-c:v", "h264_amf", "-usage", "lowlatency", "-quality", "speed", "-rc", "cbr" },
             _ => new List<string> { "-c:v", "libx264", "-preset", "veryfast", "-sc_threshold", "0" },
         };
@@ -276,6 +298,7 @@ public static class CommandBuilder
         if (c.StatsPeriod) a.AddRange(new[] { "-stats_period", "1" });
         if (c.InputThreadQueue) a.AddRange(new[] { "-thread_queue_size", "1024" });
         if (c.ReinitFilter) a.AddRange(new[] { "-reinit_filter", "0" });
+        a.AddRange(HwInitArgs(p.Encoder));
         a.AddRange(new[] { "-re", "-f", "mpegts", "-i", "pipe:0" });
         int next = 1;
         if (hasLogo) { a.Add("-i"); a.Add(p.Overlays.ImagePath); next++; }

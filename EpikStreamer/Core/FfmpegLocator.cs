@@ -73,10 +73,9 @@ public static class FfmpegLocator
         return exe;
     }
 
-    public static readonly (string Id, string Label)[] Encoders =
-    {
-        ("libx264", "x264 (CPU)"), ("h264_nvenc", "NVIDIA NVENC"), ("h264_qsv", "Intel QuickSync"), ("h264_amf", "AMD AMF"),
-    };
+    public static (string Id, string Label)[] Encoders => Os.Windows
+        ? new[] { ("libx264", "x264 (CPU)"), ("h264_nvenc", "NVIDIA NVENC"), ("h264_qsv", "Intel QuickSync"), ("h264_amf", "AMD AMF") }
+        : new[] { ("libx264", "x264 (CPU)"), ("h264_vaapi", "VA-API (Intel/AMD)"), ("h264_nvenc", "NVIDIA NVENC"), ("h264_qsv", "Intel QuickSync") };
 
     /// <summary>Test-encodes a tiny null clip with each encoder; returns ids that worked.</summary>
     public static async Task<List<string>> DetectEncodersAsync(string ffmpeg)
@@ -87,8 +86,12 @@ public static class FfmpegLocator
         {
             if (!caps.HasEncoder(id)) continue;   // not compiled into this build: skip the 15 s test
             var psi = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
-            foreach (var a in new[] { "-hide_banner", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=640x360:r=30", "-t", "0.5",
-                                      "-pix_fmt", CommandBuilder.PixFmt(id), "-c:v", id, "-f", "null", "-" }) psi.ArgumentList.Add(a);
+            var args = new List<string> { "-hide_banner", "-nostdin", "-loglevel", "error" };
+            args.AddRange(CommandBuilder.HwInitArgs(id));
+            args.AddRange(new[] { "-f", "lavfi", "-i", "color=black:s=640x360:r=30", "-t", "0.5" });
+            args.AddRange(id == "h264_vaapi" ? new[] { "-vf", CommandBuilder.EncoderFormat(id) } : new[] { "-pix_fmt", CommandBuilder.PixFmt(id) });
+            args.AddRange(new[] { "-c:v", id, "-f", "null", "-" });
+            foreach (var a in args) psi.ArgumentList.Add(a);
             try
             {
                 using var p = Process.Start(psi)!;

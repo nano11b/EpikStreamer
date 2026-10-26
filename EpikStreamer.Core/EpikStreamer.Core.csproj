@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Platform-neutral core shared by the Windows (WPF) and Linux (Avalonia) apps. The sources live in EpikStreamer/ and are linked,
+       so the WPF project builds exactly as before. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>EpikStreamer</RootNamespace><AssemblyName>EpikStreamer.Core</AssemblyName>
+    <Version>2.4.0</Version><NoWarn>CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../EpikStreamer/Core/*.cs" Link="Core/%(Filename)%(Extension)" />
+    <Compile Include="../EpikStreamer/EpikChatAutomation.cs" Link="EpikChatAutomation.cs" />
+    <EmbeddedResource Include="../EpikStreamer/Web/chat-observer.js" LogicalName="EpikStreamer.Web.chat-observer.js" />
+  </ItemGroup>
+  <ItemGroup><PackageReference Include="NetMQ" Version="4.0.4.5" /><PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" /></ItemGroup>
+</Project>

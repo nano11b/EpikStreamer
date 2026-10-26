@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.4.0 — 2026-10-26
+### Added
+- **Linux / Debian version** (`EpikStreamer.Linux`, Avalonia 11) for **x64 and arm64**, with the same features as the Windows app. It shares one `EpikStreamer.Core` (net8.0) with the Windows app.
+  - **Packages:** `epikstreamer_2.4.0_amd64.deb` / `_arm64.deb` and portable `epikstreamer-2.4.0-linux-<arch>.tar.gz`.
+    - The .deb installs to `/opt/epikstreamer` with an `/usr/bin/epikstreamer` launcher, a menu entry, icons and a man page.
+    - ffmpeg, WebKitGTK and libsecret are pulled in as dependencies.
+  - **Sign-in, stream-key fetch and chat panel** use WebKitGTK (`libwebkit2gtk-4.1`). It drives the same normal EpikChat pages as the Windows WebView2 build.
+    - If WebKitGTK is unavailable, the app opens EpikChat in your default browser and you paste the key manually.
+  - **Remembered stream keys** are stored in the desktop keyring via libsecret (GNOME Keyring / KWallet).
+    - Without a keyring they fall back to an AES-GCM-encrypted file whose key is kept in `~/.config/epikstreamer/secret.key` (mode 0600).
+  - **Encoders:** NVENC, VA-API (Intel/AMD), QuickSync and x264, with auto-detect.
+  - **Audio:** the microphone comes from PulseAudio/PipeWire (`-f pulse`), and sounds play through `paplay`/`pw-play`/`aplay`.
+  - **Updates:** the app tells you a new version is available and downloads the matching `.deb` (SHA-256 verified). It then copies `sudo apt install <file>` to the clipboard / opens it in your package installer. It never installs anything as root by itself.
+  - `update.json` gains an optional `linux.{amd64,arm64}.{url,sha256}` block. Older Windows clients ignore it.
+### Changed
+- Windows app version 2.4.0. No functional changes on Windows.
+- Platform-specific choices in the shared core (mic input, encoder list, update package) go through a single `Os.Windows` switch, so the test suite covers both platforms.
+### Known limitations (Linux)
+- Global hotkeys work on X11 only. Wayland has no global hotkey API, so use the in-app buttons there.
+- The EpikChat sign-in/chat browser opens as its own window instead of being docked in the main window.
+- Chat messages are sent only through the page's own input box. As on Windows, chat replies are off by default.
+- Library thumbnails don't refresh live while a scan is running; reopen the tab.
+- Not yet tested against a real EpikChat live session on Linux. Tested against the mock pages plus the real sign-in page. The LIVE Viewers selectors are still unverified.
+
 ## 2.3.0 — 2026-10-25
 ### Added
 - **Media library** (Library tab):

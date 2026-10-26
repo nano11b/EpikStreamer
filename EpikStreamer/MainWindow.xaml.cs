@@ -538,7 +538,7 @@ public partial class MainWindow : Window
         SViewers.Text = viewers?.ToString() ?? "–";
         OnViewerCount(viewers);
         SLive.Text = ChatToggle.IsChecked != true ? "–" : live ? "🔴 LIVE" : "offline";
-        Title = "EpikStreamer 2.3.0" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
+        Title = "EpikStreamer 2.4.0" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
     }
 
     // ---------- updates ----------

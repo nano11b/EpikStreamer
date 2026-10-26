@@ -6,6 +6,7 @@ using EpikStreamer.Core;
 var dir = "/tmp/epiktest"; Directory.CreateDirectory(dir);
 var mode = args.Length > 0 ? args[0] : "unit";
 int fails = 0;
+if (mode is "unit" or "v22") Os.Windows = true;   // these modes assert the Windows (dshow / setup.exe) code paths; Linux paths are checked separately below
 var FF = Environment.GetEnvironmentVariable("FFMPEG") ?? "/usr/bin/ffmpeg";
 void Check(bool ok, string what) { Console.WriteLine((ok ? "PASS " : "FAIL ") + what); if (!ok) fails++; }
 
@@ -352,6 +353,27 @@ if (mode == "unit")
     var seg = CommandBuilder.SegmentArgs(p, new("a.mp4", new MediaInfo(10, true, true), 9, 1), new("b.mkv", new MediaInfo(5, false, true), 0, 1), 1, "fade", 12.5);
     var sj = string.Join(" ", seg);
     Check(sj.Contains("xfade=transition=fade:duration=1:offset=0") && sj.Contains("acrossfade=d=1") && sj.Contains("anullsrc") && sj.Contains("-output_ts_offset 12.5") && sj.Contains("s302m"), "Transition segment args");
+    // --- v2.4 Linux targets (same Core, Os.Windows = false) ---
+    Os.Windows = false;
+    var lm = string.Join(" ", CommandBuilder.MicInputArgs("alsa_input.usb-Mic-00.analog-stereo"));
+    Check(lm.Contains("-f pulse") && lm.Contains("-i alsa_input.usb-Mic-00.analog-stereo") && !lm.Contains("dshow"), "Linux mic → -f pulse <source>: " + lm);
+    Check(string.Join(" ", CommandBuilder.MicInputArgs("alsa:hw:1,0")).Contains("-f alsa"), "Linux mic alsa: prefix → -f alsa");
+    Check(FfmpegLocator.Encoders.Any(e => e.Id == "h264_vaapi") && !FfmpegLocator.Encoders.Any(e => e.Id == "h264_amf"), "Linux encoder list has VA-API, no AMF");
+    var vp = MakeProfile(); vp.Encoder = "h264_vaapi";
+    var vj = string.Join(" ", CommandBuilder.EncoderArgs(vp, new List<CommandBuilder.Destination> { new("x", "rtmp://h/x/K") }, false, null));
+    Check(vj.Contains("-init_hw_device vaapi=va:") && vj.Contains("-filter_hw_device va") && vj.Contains("format=nv12,hwupload") && vj.Contains("-c:v h264_vaapi"), "VA-API: hw device + nv12/hwupload + h264_vaapi");
+    Check(vj.IndexOf("-init_hw_device", StringComparison.Ordinal) < vj.IndexOf("-i pipe:0", StringComparison.Ordinal), "VA-API: device init before inputs");
+    var lman = "{\"version\":\"9.2.0\",\"url\":\"https://github.com/nano11b/EpikStreamer/releases/download/v9.2.0/EpikStreamer-9.2.0-setup.exe\",\"sha256\":\"" + new string('a', 64) + "\",\"notes\":\"n\"," +
+               "\"linux\":{\"amd64\":{\"url\":\"https://github.com/nano11b/EpikStreamer/releases/download/v9.2.0/epikstreamer_9.2.0_amd64.deb\",\"sha256\":\"" + new string('b', 64) + "\"}," +
+               "\"arm64\":{\"url\":\"https://github.com/nano11b/EpikStreamer/releases/download/v9.2.0/epikstreamer_9.2.0_arm64.deb\",\"sha256\":\"" + new string('c', 64) + "\"}}}";
+    var lu = Updater.ParseManifest(lman);
+    Check(lu.Url.EndsWith("_" + Updater.LinuxArch + ".deb") && lu.Sha256 == new string(Updater.LinuxArch == "arm64" ? 'c' : 'b', 64) && lu.Version == new Version(9, 2, 0, 0), "Linux client picks linux." + Updater.LinuxArch + " .deb + its sha256");
+    try { Updater.ParseManifest(lman[..lman.IndexOf(",\"linux\"", StringComparison.Ordinal)] + "}"); Check(false, "Windows-only manifest rejected on Linux"); }
+    catch (InvalidOperationException e) { Check(e.Message.Contains("no Linux"), "Windows-only manifest → clear 'no Linux package' error on Linux"); }
+    Os.Windows = true;
+    var wu = Updater.ParseManifest(lman);
+    Check(wu.Url.EndsWith("setup.exe") && wu.Sha256 == new string('a', 64), "Windows client ignores the linux key (manifest stays backward compatible)");
+    Os.Windows = OperatingSystem.IsWindows();
     Console.WriteLine(fails == 0 ? "ALL UNIT TESTS PASSED" : $"{fails} FAILED");
     return fails;
 }

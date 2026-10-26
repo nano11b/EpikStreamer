@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=EpikStreamer
+GenericName=Live streaming tool
+Comment=Stream a video playlist with overlays to EpikChat and other RTMP services
+Exec=epikstreamer %U
+Icon=epikstreamer
+Terminal=false
+Categories=AudioVideo;Video;Network;
+Keywords=stream;rtmp;epikchat;ffmpeg;playlist;
+StartupWMClass=epikstreamer

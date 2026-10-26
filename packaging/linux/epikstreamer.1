@@ -1,0 +1,23 @@
+.TH EPIKSTREAMER 1 "October 2026" "EpikStreamer 2.4.0" "User Commands"
+.SH NAME
+epikstreamer \- playlist live streamer for EpikChat and RTMP services
+.SH SYNOPSIS
+.B epikstreamer
+[\fB\-\-minimized\fR] [\fB\-\-version\fR]
+.SH DESCRIPTION
+EpikStreamer streams a playlist of videos back to back over one RTMP connection using the system
+.BR ffmpeg (1),
+with overlays, background music, microphone (PulseAudio/PipeWire), scheduling, chat commands and song requests.
+EpikChat sign\-in and the chat panel use WebKitGTK; stream keys are stored in the Secret Service keyring
+(or an encrypted fallback file under ~/.config/epikstreamer when no keyring is available).
+.SH OPTIONS
+.TP
+.B \-\-minimized
+Start minimized to the tray (used by "Launch at login").
+.TP
+.B \-\-version
+Print the version and exit.
+.SH FILES
+~/.config/epikstreamer/, ~/.local/share/epikstreamer/
+.SH SEE ALSO
+https://github.com/nano11b/EpikStreamer

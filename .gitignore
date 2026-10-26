@@ -10,6 +10,9 @@ fdd/
 *-setup.exe
 *.sha256
 update.json
+*.deb
+*.tar.gz
+SHA256SUMS*.txt
 # bundled ffmpeg binaries (downloaded at build time)
 ffmpeg/
 ffmpeg.exe

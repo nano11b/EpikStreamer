@@ -1,0 +1,584 @@
+<Window x:Class="EpikStreamer.MainWindow" xmlns="https://github.com/avaloniaui" xmlns:local="clr-namespace:EpikStreamer"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer 2.4.0" Width="1280" Height="760" MinWidth="820" MinHeight="600"
+        Background="{DynamicResource Bg}" Icon="/Assets/icon.png">
+  <Grid Margin="12">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*" MinWidth="640"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="0"/></Grid.ColumnDefinitions>
+
+    <!-- Top bar: profiles + transport -->
+    <DockPanel Grid.Row="0" Grid.ColumnSpan="3" Margin="0,0,0,8">
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+        <ToggleButton x:Name="MusicMuteBtn" Content="🎵" Click="MusicMute_Click"  ToolTip.Tip="Mute background music (live)"/>
+        <ToggleButton x:Name="MicMuteBtn" Content="🎤" Click="MicMute_Click"  ToolTip.Tip="Mute microphone (live)"/>
+        <ToggleButton x:Name="OverlayHideBtn" Content="🖼" Click="OverlayHide_Click"  ToolTip.Tip="Hide logo/text/clock overlays (live)"/>
+        <Button Content="Mini" Click="Mini_Click" Classes="secondary"  ToolTip.Tip="Compact always-on-top player"/>
+        <ToggleButton x:Name="ChatToggle" Content="💬 Chat" Click="ChatToggle_Click"  ToolTip.Tip="Show EpikChat chat (same signed-in session; never opens a second one)"/>
+        <Button Content="Check for updates" Click="CheckUpdates_Click" Classes="secondary"/>
+        <Button x:Name="StartBtn" Content="▶ Start" Click="Start_Click" Background="#2E9E5B"/>
+        <Button x:Name="SkipBtn" Content="⏭ Next" Click="Skip_Click" IsEnabled="False" Classes="secondary"/>
+        <Button x:Name="StopBtn" Content="■ Stop" Click="Stop_Click" IsEnabled="False" Background="#C0392B"/>
+      </StackPanel>
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Text="Profile" FontWeight="SemiBold"/>
+        <ComboBox x:Name="ProfileCombo" Width="190" SelectionChanged="ProfileCombo_SelectionChanged"/>
+        <Button Content="New" Click="NewProfile_Click" Classes="secondary"/>
+        <Button Content="Rename" Click="RenameProfile_Click" Classes="secondary"/>
+        <Button Content="Duplicate" Click="DuplicateProfile_Click" Classes="secondary"/>
+        <Button Content="Delete" Click="DeleteProfile_Click" Classes="secondary"/>
+        <Button Content="Save" Click="SaveProfile_Click" Classes="secondary"/>
+      </StackPanel>
+    </DockPanel>
+
+    <GridSplitter x:Name="ChatSplitter" Grid.Row="1" Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="{DynamicResource Border}" IsVisible="False"/>
+    <Border x:Name="ChatHost" Grid.Row="1" Grid.Column="2" BorderBrush="{DynamicResource Border}" BorderThickness="1" IsVisible="False"><TextBlock x:Name="ChatNote" TextWrapping="Wrap" Margin="8" Foreground="{DynamicResource Dim}"/></Border>
+    <TabControl x:Name="Tabs" Grid.Row="1">
+      <!-- SOURCE / PLAYLIST -->
+      <TabItem Header="Source / Playlist">
+        <DockPanel Margin="10">
+          <StackPanel DockPanel.Dock="Right" Width="130">
+            <Button Content="Add files…" Click="AddFiles_Click"/>
+            <Button Content="Remove" Click="RemoveFile_Click" Classes="secondary"/>
+            <Button Content="Move up" Click="MoveUp_Click" Classes="secondary"/>
+            <Button Content="Move down" Click="MoveDown_Click" Classes="secondary"/>
+            <Button Content="Clear" Click="ClearList_Click" Classes="secondary"/>
+            <CheckBox x:Name="LoopCheck" Content="Loop playlist" Margin="6,14,0,4"/>
+            <CheckBox x:Name="ShuffleCheck" Content="Shuffle" Margin="6,4,0,4"/>
+          </StackPanel>
+          <TextBlock DockPanel.Dock="Bottom" Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Margin="0,6,0,0"
+                     Text="Files play back to back, gaplessly, over one connection. Each is scaled/padded to the output size and frame rate. Drag-and-drop files here too."/>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+            <TextBlock Text="Transition"/><ComboBox x:Name="TransitionCombo" Width="130"/>
+            <TextBlock Text="  Crossfade" Margin="10,0,6,0"/><Slider x:Name="XfadeSlider" Minimum="0" Maximum="5" Width="180" TickFrequency="0.25" IsSnapToTickEnabled="True"/>
+            <TextBlock Text="{Binding #XfadeSlider.Value, StringFormat='{}{0:0.##} s'}" Width="50"/>
+            <TextBlock Foreground="{DynamicResource Dim}" Text="0 = hard cut (still gapless)"/>
+          </StackPanel>
+          <ListBox x:Name="PlaylistBox" Margin="0,0,8,0" SelectionMode="Multiple" DragDrop.AllowDrop="True"/>
+        </DockPanel>
+      </TabItem>
+
+      <!-- OVERLAYS -->
+      <TabItem Header="Overlays">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10">
+          <local:GroupBox Header="Image / logo">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <CheckBox x:Name="ImgEnable" Content="Show image" Grid.ColumnSpan="3"/>
+              <TextBlock Grid.Row="1" Text="PNG file"/><TextBox x:Name="ImgPath" Grid.Row="1" Grid.Column="1"/><Button Grid.Row="1" Grid.Column="2" Content="Browse…" Click="BrowseImage_Click" Classes="secondary"/>
+              <TextBlock Grid.Row="2" Text="Position"/><ComboBox x:Name="ImgCorner" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Width="160"/>
+              <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal">
+                <TextBlock Text="Scale (% of width)" Width="110"/><Slider x:Name="ImgScale" Minimum="2" Maximum="60" Width="180" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                <TextBlock Text="{Binding #ImgScale.Value, StringFormat='{}{0:0}%'}" Width="40"/>
+                <TextBlock Text="Opacity" Margin="16,0,8,0"/><Slider x:Name="ImgOpacity" Minimum="0" Maximum="100" Width="180" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                <TextBlock Text="{Binding #ImgOpacity.Value, StringFormat='{}{0:0}%'}"/>
+              </StackPanel>
+            </Grid>
+          </local:GroupBox>
+          <local:GroupBox Header="Text">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <CheckBox x:Name="TxtEnable" Content="Show text" Grid.ColumnSpan="3"/>
+              <TextBlock Grid.Row="1" Text="Text"/><TextBox x:Name="TxtText" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"/>
+              <StackPanel Grid.Row="2" Grid.ColumnSpan="3" Orientation="Horizontal">
+                <TextBlock Text="Font size" Width="110"/><TextBox x:Name="TxtSize" Width="50"/>
+                <TextBlock Text="Color" Margin="16,0,8,0"/><TextBox x:Name="TxtColor" Width="90"  ToolTip.Tip="#RRGGBB or a name like white, yellow"/>
+                <TextBlock Text="Position" Margin="16,0,8,0"/><ComboBox x:Name="TxtCorner" Width="150"/>
+                <CheckBox x:Name="TxtBox" Content="Background box" Margin="16,4,0,4"/>
+              </StackPanel>
+              <StackPanel Grid.Row="3" Grid.ColumnSpan="3" Orientation="Horizontal">
+                <CheckBox x:Name="TxtTicker" Content="Scrolling ticker" Width="126"/>
+                <TextBlock Text="Speed (px/s)"/><TextBox x:Name="TxtSpeed" Width="60"/>
+              </StackPanel>
+              <TextBlock Grid.Row="4" Text="Font file"/><TextBox x:Name="FontPath" Grid.Row="4" Grid.Column="1"  ToolTip.Tip="Blank = DejaVu Sans (/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf)"/><Button Grid.Row="4" Grid.Column="2" Content="Browse…" Click="BrowseFont_Click" Classes="secondary"/>
+            </Grid>
+          </local:GroupBox>
+          <local:GroupBox Header="Clock / timestamp">
+            <StackPanel Orientation="Horizontal">
+              <CheckBox x:Name="ClkEnable" Content="Show clock"/>
+              <TextBlock Text="Format"/><TextBox x:Name="ClkFormat" Width="150"  ToolTip.Tip="strftime format, e.g. %Y-%m-%d %X  or  %H.%M (blank = default)"/>
+              <TextBlock Text="Size" Margin="16,0,8,0"/><TextBox x:Name="ClkSize" Width="50"/>
+              <TextBlock Text="Position" Margin="16,0,8,0"/><ComboBox x:Name="ClkCorner" Width="150"/>
+            </StackPanel>
+          </local:GroupBox>
+          <local:GroupBox Header="Now playing card (v2.3)">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <CheckBox x:Name="NpEnable" Content="Show a now-playing card" Width="190"/>
+                <TextBlock Text="Mode"/><ComboBox x:Name="NpMode" Width="190"><ComboBoxItem Content="Auto"/><ComboBoxItem Content="Always"/></ComboBox>
+                <TextBlock Text="Show for (s)" Margin="16,0,8,0"/><TextBox x:Name="NpSeconds" Width="50"  ToolTip.Tip="Auto mode: seconds the card stays up after each track change"/>
+                <TextBlock Text="Position" Margin="16,0,8,0"/><ComboBox x:Name="NpCorner" Width="150"/>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Width (% of video)" Width="120"/><Slider x:Name="NpWidth" Minimum="20" Maximum="90" Width="150" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                <TextBlock Text="{Binding #NpWidth.Value, StringFormat='{}{0:0}%'}" Width="40"/>
+                <TextBlock Text="Background" Margin="10,0,8,0"/><TextBox x:Name="NpBg" Width="80"/>
+                <TextBlock Text="Opacity" Margin="10,0,8,0"/><Slider x:Name="NpOpacity" Minimum="0" Maximum="100" Width="120" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                <TextBlock Text="Text" Margin="10,0,8,0"/><TextBox x:Name="NpText" Width="80"/>
+                <TextBlock Text="Accent" Margin="10,0,8,0"/><TextBox x:Name="NpAccent" Width="80"/>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <CheckBox x:Name="NpThumb" Content="Thumbnail"/><CheckBox x:Name="NpProgress" Content="Progress bar + time" Margin="12,4,0,4"/>
+                <CheckBox x:Name="NpNext" Content="Up next" Margin="12,4,0,4"/><CheckBox x:Name="NpReq" Content="Requested by" Margin="12,4,0,4"/>
+                <TextBlock Text="Label" Margin="16,0,8,0"/><TextBox x:Name="NpLabel" Width="130"/>
+                <Button Content="Show now" Click="NpShow_Click" Classes="secondary" Margin="16,0,0,0"  ToolTip.Tip="While streaming: show the card now (Auto mode)"/>
+              </StackPanel>
+              <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Title (from metadata or the file name), library thumbnail, progress, up next and who requested it. The card is a picture that's redrawn about once a second and swapped in live, so the stream never restarts. It uses the text font above."/>
+            </StackPanel>
+          </local:GroupBox>
+        </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- OUTPUT / ENCODER -->
+      <TabItem Header="Output / Encoder">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10">
+          <local:GroupBox Header="Outputs (multi-stream)">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <DockPanel Margin="0,0,10,0">
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal">
+                  <Button Content="Add" Click="AddOutput_Click" Classes="secondary"/>
+                  <Button Content="Remove" Click="RemoveOutput_Click" Classes="secondary"/>
+                </StackPanel>
+                <ListBox x:Name="OutputsList" Height="150" SelectionChanged="OutputsList_SelectionChanged"/>
+              </DockPanel>
+              <Grid Grid.Column="1">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                <TextBlock Text="Name"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                  <TextBox x:Name="OutNameBox" Width="170"/>
+                  <TextBlock Text="  Preset"/><ComboBox x:Name="OutPresetCombo" Width="120" SelectionChanged="OutPreset_SelectionChanged"/>
+                  <CheckBox x:Name="OutEnabledCheck" Content="Enabled" Margin="12,4,0,4"/>
+                </StackPanel>
+                <TextBlock Grid.Row="1" Text="Server URL"/><TextBox x:Name="ServerBox" Grid.Row="1" Grid.Column="1"/>
+                <TextBlock Grid.Row="2" Text="Stream key"/><TextBox x:Name="KeyBox" Grid.Row="2" Grid.Column="1" PasswordChar="•"/>
+                <TextBlock x:Name="OutHint" Grid.Row="3" Grid.Column="1" Foreground="{DynamicResource Dim}" TextWrapping="Wrap"/>
+                <CheckBox x:Name="RememberKeyCheck" Grid.Row="4" Grid.Column="1" Content="Remember keys for this profile (stored in the system keyring / Secret Service)"/>
+                <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,0">
+                  <Button Content="Sign in to EpikChat &amp; get stream key" Click="EpikSignIn_Click" Margin="0,3,0,3"/>
+                  <TextBlock Text="  Audience" /><ComboBox x:Name="AudienceCombo" Width="100" MinWidth="90"><ComboBoxItem Content="Public"/><ComboBoxItem Content="Private"/></ComboBox>
+                  <Button Content="Sign out" Click="EpikSignOut_Click" Classes="secondary"/>
+                </StackPanel>
+              </Grid>
+            </Grid>
+          </local:GroupBox>
+          <local:GroupBox Header="Local recording">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="130"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <CheckBox x:Name="RecEnableCheck" Content="Record while streaming (MKV, crash-safe)" Grid.ColumnSpan="2"/>
+              <CheckBox x:Name="RemuxCheck" Grid.Column="1" HorizontalAlignment="Right" Content="Convert to MP4 when stopped"/>
+              <TextBlock Grid.Row="1" Text="Folder"/><TextBox x:Name="RecFolderBox" Grid.Row="1" Grid.Column="1"  ToolTip.Tip="Blank = ~/Videos/EpikStreamer"/>
+              <Button Grid.Row="1" Grid.Column="2" Content="Browse…" Click="BrowseRecFolder_Click" Classes="secondary"/>
+              <TextBlock Grid.Row="2" Text="File name"/><TextBox x:Name="RecPatternBox" Grid.Row="2" Grid.Column="1"  ToolTip.Tip="Tokens: {profile} {date} {time} {part}"/>
+              <TextBlock Grid.Row="2" Grid.Column="2" Foreground="{DynamicResource Dim}" Text=" {profile} {date} {time} {part}"/>
+            </Grid>
+          </local:GroupBox>
+          <local:GroupBox Header="Encoder">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Video encoder" Width="122"/><ComboBox x:Name="EncoderCombo" Width="200"/>
+                <Button x:Name="DetectBtn" Content="Auto-detect" Click="Detect_Click" Classes="secondary"/>
+                <TextBlock x:Name="DetectText" Foreground="{DynamicResource Dim}" Margin="10,0,0,0"/>
+              </StackPanel>
+              <WrapPanel Margin="0,6,0,0">
+                <TextBlock Text="Width"/><TextBox x:Name="WidthBox" Width="60"/>
+                <TextBlock Text="  Height"/><TextBox x:Name="HeightBox" Width="60"/>
+                <TextBlock Text="  FPS"/><TextBox x:Name="FpsBox" Width="45"/>
+                <TextBlock Text="  Video kbps"/><TextBox x:Name="VBitBox" Width="60"/>
+                <TextBlock Text="  Audio kbps"/><TextBox x:Name="ABitBox" Width="50"/>
+                <TextBlock Text="  Keyframe (s)"/><TextBox x:Name="KeyIntBox" Width="40"/>
+              </WrapPanel>
+              <TextBlock Foreground="{DynamicResource Dim}" Text="EpikChat cap: 1280x720, 30 FPS, 2500 kbps."/>
+            </StackPanel>
+          </local:GroupBox>
+          <local:GroupBox Header="Reliability">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Max reconnect attempts" /><TextBox x:Name="RetriesBox" Width="50"/>
+              <TextBlock Foreground="{DynamicResource Dim}" Text="  Backoff 2, 4, 8, 16, 32, 60 s. Counter resets after 60 s of healthy streaming."/>
+            </StackPanel>
+          </local:GroupBox>
+          <local:GroupBox Header="Updates">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="130"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <TextBlock Text="Update source"/><TextBox x:Name="UpdateUrlBox" Grid.Column="1"  ToolTip.Tip="GitHub 'latest release' API URL or an update.json URL (https)"/>
+              <TextBlock Grid.Row="1" Text="GitHub token"/>
+              <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
+                <TextBox x:Name="GhTokenBox" Width="260" PasswordChar="•"/>
+                <TextBlock Foreground="{DynamicResource Dim}" Text="  optional, only to avoid GitHub API rate limits (public repo needs none)"/>
+              </StackPanel>
+              <CheckBox x:Name="CheckOnStartupCheck" Grid.Row="2" Grid.Column="1" Content="Check for updates when the app starts"/>
+            </Grid>
+          </local:GroupBox>
+          <local:GroupBox Header="ffmpeg">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="130"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <TextBlock Text="ffmpeg"/><TextBox x:Name="FfmpegBox" Grid.Column="1"  ToolTip.Tip="Blank = auto: the system ffmpeg (/usr/bin/ffmpeg via PATH). Install with: sudo apt install ffmpeg"/>
+              <Button Grid.Column="2" Content="Browse…" Click="BrowseFfmpeg_Click" Classes="secondary"/>
+              <Button x:Name="DownloadBtn" Grid.Column="3" Content="Download ffmpeg" Click="Download_Click" IsVisible="False"/>
+              <TextBlock x:Name="FfmpegStatus" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Foreground="{DynamicResource Dim}" TextWrapping="Wrap"/>
+            </Grid>
+          </local:GroupBox>
+        </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- AUDIO (per profile) -->
+      <TabItem Header="Audio">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10">
+          <local:GroupBox Header="Loudness">
+            <WrapPanel>
+              <TextBlock Text="Normalize"/><ComboBox x:Name="NormCombo" Width="190"><ComboBoxItem Content="Off" Tag="Off"/><ComboBoxItem Content="Loudness (EBU R128 loudnorm)" Tag="Loudnorm"/><ComboBoxItem Content="Dynamic (dynaudnorm)" Tag="Dynaudnorm"/></ComboBox>
+              <TextBlock Text="  Target LUFS"/><TextBox x:Name="LufsBox" Width="50"  ToolTip.Tip="-16 is typical for streams, -14 for music, -23 broadcast"/>
+              <TextBlock Text="  Video audio volume" Margin="16,0,8,0"/><Slider x:Name="MainVolSlider" Minimum="0" Maximum="200" Width="160" TickFrequency="5" IsSnapToTickEnabled="True"/>
+              <TextBlock Text="{Binding #MainVolSlider.Value, StringFormat='{}{0:0}%'}"/>
+            </WrapPanel>
+          </local:GroupBox>
+          <local:GroupBox Header="Background music (mixed under the video's audio)">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Right" Width="130">
+                <Button Content="Add music…" Click="AddMusic_Click"/>
+                <Button Content="Remove" Click="RemoveMusic_Click" Classes="secondary"/>
+                <Button Content="Clear" Click="ClearMusic_Click" Classes="secondary"/>
+              </StackPanel>
+              <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+                <CheckBox x:Name="MusicEnable" Content="Play background music"/>
+                <CheckBox x:Name="MusicShuffleCheck" Content="Shuffle"/>
+                <TextBlock Text="Volume"/><Slider x:Name="MusicVolSlider" Minimum="0" Maximum="100" Width="150" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="MusicVol_Changed"/>
+                <TextBlock Text="{Binding #MusicVolSlider.Value, StringFormat='{}{0:0}%'}" Width="40"/>
+              </StackPanel>
+              <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+                <CheckBox x:Name="DuckCheck" Content="Duck music when the video / mic is loud"/>
+                <TextBlock Text="Sensitivity"/><Slider x:Name="DuckSlider" Minimum="1" Maximum="30" Width="120" TickFrequency="1" IsSnapToTickEnabled="True"  ToolTip.Tip="Threshold (lower = ducks more often)"/>
+                <TextBlock Text="Strength"/><Slider x:Name="DuckRatioSlider" Minimum="2" Maximum="20" Width="120" TickFrequency="1" IsSnapToTickEnabled="True"/>
+              </StackPanel>
+              <ListBox x:Name="MusicList" Height="110" Margin="0,4,8,0" SelectionMode="Multiple" DragDrop.AllowDrop="True"/>
+            </DockPanel>
+          </local:GroupBox>
+          <local:GroupBox Header="Microphone">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <CheckBox x:Name="MicEnable" Content="Mix in microphone"/>
+                <TextBlock Text="Device"/><AutoCompleteBox x:Name="MicCombo" Width="300" FilterMode="Contains" MinimumPrefixLength="0"/>
+                <Button Content="Refresh" Click="RefreshMics_Click" Classes="secondary"/>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Volume"/><Slider x:Name="MicVolSlider" Minimum="0" Maximum="200" Width="150" TickFrequency="5" IsSnapToTickEnabled="True" ValueChanged="MicVol_Changed"/>
+                <TextBlock Text="{Binding #MicVolSlider.Value, StringFormat='{}{0:0}%'}" Width="44"/>
+                <CheckBox x:Name="GateCheck" Content="Noise gate" Margin="16,4,8,4"/>
+                <TextBlock Text="Gate level"/><Slider x:Name="GateSlider" Minimum="1" Maximum="20" Width="120" TickFrequency="1" IsSnapToTickEnabled="True"/>
+              </StackPanel>
+              <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Mute music / mic / overlays live with the 🎵 🎤 🖼 buttons, the tray menu, the mini player or hotkeys. Volume sliders apply live too."/>
+            </StackPanel>
+          </local:GroupBox>
+        </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- SCHEDULE -->
+      <TabItem Header="Schedule">
+        <Grid Margin="10">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions>
+          <DockPanel Margin="0,0,10,0">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+              <CheckBox x:Name="SchedulerEnableCheck" Content="Scheduler on (streams start/stop automatically while the app runs)" Click="SchedulerEnable_Click"/>
+            </StackPanel>
+            <TextBlock x:Name="SchedNextText" DockPanel.Dock="Bottom" Foreground="{DynamicResource Dim}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            <ListBox x:Name="ScheduleList" SelectionChanged="ScheduleList_SelectionChanged"/>
+          </DockPanel>
+          <StackPanel Grid.Column="1">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <TextBlock Text="Name"/><TextBox x:Name="SchedName" Grid.Column="1"/>
+              <TextBlock Grid.Row="1" Text="Repeat"/>
+              <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
+                <ComboBox x:Name="SchedRepeat" Width="110" SelectionChanged="SchedRepeat_Changed"><ComboBoxItem Content="Once"/><ComboBoxItem Content="Daily"/><ComboBoxItem Content="Weekly"/></ComboBox>
+                <CheckBox x:Name="SchedEnabled" Content="Enabled" Margin="12,4,0,4"/>
+              </StackPanel>
+              <TextBlock Grid.Row="2" Text="Date"/><CalendarDatePicker x:Name="SchedDate" Grid.Row="2" Grid.Column="1" Margin="0,3"  ToolTip.Tip="The day (Once) or the first day (Daily/Weekly)"/>
+              <TextBlock Grid.Row="3" Text="Days"/>
+              <WrapPanel x:Name="SchedDays" Grid.Row="3" Grid.Column="1">
+                <CheckBox Content="Mon" Tag="Monday" Margin="0,4,6,4"/><CheckBox Content="Tue" Tag="Tuesday" Margin="0,4,6,4"/><CheckBox Content="Wed" Tag="Wednesday" Margin="0,4,6,4"/>
+                <CheckBox Content="Thu" Tag="Thursday" Margin="0,4,6,4"/><CheckBox Content="Fri" Tag="Friday" Margin="0,4,6,4"/><CheckBox Content="Sat" Tag="Saturday" Margin="0,4,6,4"/><CheckBox Content="Sun" Tag="Sunday" Margin="0,4,6,4"/>
+              </WrapPanel>
+              <TextBlock Grid.Row="4" Text="Start / stop"/>
+              <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal">
+                <TextBox x:Name="SchedStart" Width="60"  ToolTip.Tip="HH:mm (24h)"/><TextBlock Text="  to  "/><TextBox x:Name="SchedStop" Width="60"  ToolTip.Tip="HH:mm; blank = until the playlist ends; earlier than start = next day"/>
+                <TextBlock Foreground="{DynamicResource Dim}" Text="  24h; stop optional"/>
+              </StackPanel>
+              <TextBlock Grid.Row="5" Text="Profile"/><ComboBox x:Name="SchedProfile" Grid.Row="5" Grid.Column="1"/>
+              <TextBlock Grid.Row="6" Text="Playlist"/>
+              <DockPanel Grid.Row="6" Grid.Column="1"><Button DockPanel.Dock="Right" Content="…" Click="SchedBrowse_Click" Classes="secondary"/><TextBox x:Name="SchedPlaylist"  ToolTip.Tip="Optional .m3u/.txt playlist; blank = the profile's playlist"/></DockPanel>
+              <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="Add new" Click="SchedAdd_Click" Margin="0,3,0,3"/>
+                <Button Content="Save changes" Click="SchedUpdate_Click" Classes="secondary"/>
+                <Button Content="Delete" Click="SchedDelete_Click" Classes="secondary"/>
+              </StackPanel>
+            </Grid>
+            <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Margin="0,10,0,0"
+                       Text="The app must be running (tip: Settings → launch at login + minimize to tray). A scheduled start is skipped if a stream is already running, and only fires within 2 minutes of its start time."/>
+          </StackPanel>
+        </Grid>
+      </TabItem>
+
+      <!-- HISTORY -->
+      <TabItem Header="History" x:Name="HistoryTab">
+        <DockPanel Margin="10">
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+            <Button Content="Refresh" Click="HistoryRefresh_Click" Margin="0,3,0,3"/>
+            <Button Content="Export CSV…" Click="HistoryExport_Click" Classes="secondary"/>
+            <Button Content="Clear history" Click="HistoryClear_Click" Classes="secondary"/>
+            <TextBlock x:Name="HistorySummary" Foreground="{DynamicResource Dim}" Margin="12,0,0,0"/>
+          </StackPanel>
+          <TextBlock DockPanel.Dock="Top" Text="Last 30 sessions: duration (bars, minutes) and peak viewers (dots)" Foreground="{DynamicResource Dim}" Margin="0,8,0,2"/>
+          <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource Border}" BorderThickness="1" Background="{DynamicResource Input}" Height="140">
+            <Canvas x:Name="HistoryChart" ClipToBounds="True"/>
+          </Border>
+          <ListBox x:Name="HistoryList" Margin="0,8,0,0" FontFamily="DejaVu Sans Mono,Liberation Mono,monospace"/>
+        </DockPanel>
+      </TabItem>
+
+      <!-- SETTINGS (app-wide) -->
+      <TabItem Header="Settings">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10">
+          <local:GroupBox Header="Appearance">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Theme"/><ComboBox x:Name="ThemeCombo" Width="160" SelectionChanged="ThemeCombo_SelectionChanged"/>
+              <TextBlock Foreground="{DynamicResource Dim}" Text="  applies immediately"/>
+            </StackPanel>
+          </local:GroupBox>
+          <local:GroupBox Header="Tray and startup">
+            <WrapPanel>
+              <CheckBox x:Name="MinToTrayCheck" Content="Minimize to tray"/>
+              <CheckBox x:Name="CloseToTrayCheck" Content="Close button hides to tray (Exit from the tray menu)"/>
+              <CheckBox x:Name="NotifyCheck" Content="Notifications (start / stop / reconnect / errors)"/>
+              <CheckBox x:Name="StartupCheck" Content="Launch at login"/>
+              <CheckBox x:Name="StartMinCheck" Content="…start minimized to tray"/>
+            </WrapPanel>
+          </local:GroupBox>
+          <local:GroupBox Header="Global hotkeys">
+            <StackPanel>
+              <CheckBox x:Name="HotkeysCheck" Content="Enable system-wide hotkeys"/>
+              <WrapPanel>
+                <TextBlock Text="Start/stop"/><TextBox x:Name="HkStart" Width="110"/>
+                <TextBlock Text="  Next"/><TextBox x:Name="HkNext" Width="110"/>
+                <TextBlock Text="  Mute music"/><TextBox x:Name="HkMusic" Width="110"/>
+                <TextBlock Text="  Mute mic"/><TextBox x:Name="HkMic" Width="110"/>
+                <TextBlock Text="  Overlays"/><TextBox x:Name="HkOverlays" Width="110"/>
+                <Button Content="Apply" Click="HotkeysApply_Click"/>
+              </WrapPanel>
+              <TextBlock x:Name="HotkeyStatus" Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Format: Ctrl+Alt+S, Shift+F9, Win+Num5, MediaNext. Blank = none. X11 only (Wayland compositors block global grabs)."/>
+            </StackPanel>
+          </local:GroupBox>
+          <local:GroupBox Header="Chat commands (needs the 💬 Chat panel open)">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="130"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <WrapPanel Grid.ColumnSpan="2">
+                <CheckBox x:Name="CmdEnableCheck" Content="Respond to !song, !uptime, !help and custom commands"/>
+                <CheckBox x:Name="CmdOverlayCheck" Content="Show responses on stream"/>
+                <TextBlock Text="for"/><TextBox x:Name="CmdOverlaySecs" Width="40"/><TextBlock Text="s   Cooldown"/><TextBox x:Name="CmdCooldown" Width="40"/><TextBlock Text="s"/>
+              </WrapPanel>
+              <CheckBox x:Name="ReplyInChatCheck" Grid.Row="1" Grid.ColumnSpan="2" Content="Also reply in EpikChat as me (types into the chat box — off by default)" Click="ReplyInChat_Click"/>
+              <TextBlock Grid.Row="2" Text="!song text"/><TextBox x:Name="SongTpl" Grid.Row="2" Grid.Column="1"  ToolTip.Tip="{}{song} {music} {uptime} {viewers} {user}"/>
+              <TextBlock Grid.Row="3" Text="!uptime text"/><TextBox x:Name="UptimeTpl" Grid.Row="3" Grid.Column="1"/>
+              <TextBlock Grid.Row="4" Text="Custom commands" VerticalAlignment="Top" Margin="0,6,8,0"/>
+              <TextBox x:Name="CustomCmds" Grid.Row="4" Grid.Column="1" Height="80" AcceptsReturn="True" VerticalContentAlignment="Top" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                        ToolTip.Tip="One per line: !trigger = response   (placeholders {song} {music} {uptime} {viewers} {user}; start a line with # to disable it)"/>
+              <TextBlock Grid.Row="5" Grid.Column="1" Foreground="{DynamicResource Dim}" Text="One per line:  !discord = Join us at …   Placeholders: {song} {music} {uptime} {viewers} {user}"/>
+              <TextBlock Grid.Row="6" Text="My EpikChat name"/>
+              <WrapPanel Grid.Row="6" Grid.Column="1">
+                <TextBox x:Name="MyUserBox" Width="160"  ToolTip.Tip="Messages from this name are never answered. Blank = read from the page header."/>
+                <TextBlock Text="Min. seconds between chat replies"/><TextBox x:Name="ReplyIntervalBox" Width="40"/>
+                <CheckBox x:Name="ChatDebugCheck" Content="Log every chat message"/>
+                <Button Content="Chat diagnostics…" Classes="secondary" Click="ChatDiag_Click"  ToolTip.Tip="Save a sanitized snapshot of the chat page structure (no message text or names) for troubleshooting"/>
+              </WrapPanel>
+              <TextBlock x:Name="ChatObsStatus" Grid.Row="7" Grid.ColumnSpan="2" Foreground="{DynamicResource Dim}" Text="Chat observer: not attached (open the 💬 Chat panel)"/>
+            </Grid>
+          </local:GroupBox>
+          <local:GroupBox Header="On-stream alerts (viewer count from the 💬 Chat panel)">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="130"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <WrapPanel Grid.ColumnSpan="3">
+                <CheckBox x:Name="AlertsCheck" Content="Show alerts"/>
+                <CheckBox x:Name="NewViewerCheck" Content="New viewer"/>
+                <TextBlock Text="Duration"/><TextBox x:Name="AlertSecs" Width="40"/><TextBlock Text="s"/>
+              </WrapPanel>
+              <TextBlock Grid.Row="1" Text="New viewer text"/><TextBox x:Name="NewViewerTpl" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"/>
+              <TextBlock Grid.Row="2" Text="Milestones"/><TextBox x:Name="MilestonesBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"  ToolTip.Tip="Comma-separated viewer counts"/>
+              <TextBlock Grid.Row="3" Text="Milestone text"/><TextBox x:Name="MilestoneTpl" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"/>
+              <TextBlock Grid.Row="4" Text="Sound (.wav)"/><TextBox x:Name="AlertSoundBox" Grid.Row="4" Grid.Column="1"  ToolTip.Tip="Played on this PC (not mixed into the stream)"/>
+              <StackPanel Grid.Row="4" Grid.Column="2" Orientation="Horizontal">
+                <Button Content="Browse…" Click="AlertSoundBrowse_Click" Classes="secondary"/>
+                <Button Content="Test alert" Click="AlertTest_Click"/>
+              </StackPanel>
+            </Grid>
+          </local:GroupBox>
+          <Button Content="Save settings" Click="SaveSettings_Click" HorizontalAlignment="Left" Margin="0,6,0,0"/>
+        </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- LIBRARY (v2.3) -->
+      <TabItem Header="Library" x:Name="LibraryTab">
+        <DockPanel Margin="10">
+          <StackPanel DockPanel.Dock="Left" Width="230" Margin="0,0,10,0">
+            <TextBlock Text="Watched folders" FontWeight="Bold"/>
+            <ListBox x:Name="LibFolders" Height="110"/>
+            <StackPanel Orientation="Horizontal">
+              <Button Content="Add folder…" Click="LibAddFolder_Click"/>
+              <Button Content="Remove" Click="LibRemoveFolder_Click" Classes="secondary"/>
+            </StackPanel>
+            <CheckBox x:Name="LibSubfolders" Content="Include subfolders"/>
+            <CheckBox x:Name="LibThumbs" Content="Make thumbnails"/>
+            <TextBlock Text="File types"/><TextBox x:Name="LibExt"/>
+            <Button x:Name="LibScanBtn" Content="Scan now" Click="LibScan_Click"/>
+            <TextBlock x:Name="LibStatus" Foreground="{DynamicResource Dim}" TextWrapping="Wrap"/>
+            <TextBlock Text="Saved playlists" FontWeight="Bold" Margin="0,12,0,0"/>
+            <ComboBox x:Name="PlCombo" SelectionChanged="PlCombo_Changed"/>
+            <StackPanel Orientation="Horizontal">
+              <Button Content="New" Click="PlNew_Click" Classes="secondary"/>
+              <Button Content="Rename" Click="PlRename_Click" Classes="secondary"/>
+              <Button Content="Delete" Click="PlDelete_Click" Classes="secondary"/>
+            </StackPanel>
+            <ListBox x:Name="PlItems" Height="170" DragDrop.AllowDrop="True" SelectionMode="Multiple"  ToolTip.Tip="Drag items here from the library"/>
+            <StackPanel Orientation="Horizontal">
+              <Button Content="▲" Click="PlUp_Click" Classes="secondary"/>
+              <Button Content="▼" Click="PlDown_Click" Classes="secondary"/>
+              <Button Content="Remove" Click="PlRemoveItem_Click" Classes="secondary"/>
+            </StackPanel>
+            <Button Content="Use as stream playlist" Click="PlUse_Click"  ToolTip.Tip="Replace the Source / Playlist list of the current profile"/>
+            <Button Content="Queue all (requests)" Click="PlQueue_Click" Classes="secondary"/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+            <TextBlock Text="Search"/><TextBox x:Name="LibSearch" Width="220" TextChanged="LibQuery_Changed"/>
+            <TextBlock Text="Sort" Margin="12,0,6,0"/><ComboBox x:Name="LibSort" Width="130" SelectionChanged="LibQuery_Changed"/>
+            <TextBlock Text="Filter" Margin="12,0,6,0"/><ComboBox x:Name="LibFilter" Width="140" SelectionChanged="LibQuery_Changed"/>
+            <CheckBox x:Name="LibGrid" Content="Grid view" Margin="12,4,0,4" Click="LibView_Click"/>
+            <TextBlock x:Name="LibCount" Foreground="{DynamicResource Dim}" Margin="12,0,0,0"/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+            <Button Content="Add to request queue" Click="LibQueue_Click"/>
+            <Button Content="Add to saved playlist" Click="LibToPlaylist_Click" Classes="secondary"/>
+            <Button Content="Add to stream playlist" Click="LibToStream_Click" Classes="secondary"/>
+            <TextBlock Foreground="{DynamicResource Dim}" Margin="10,0,0,0" Text="Drag items onto a saved playlist. The library is what !request searches."/>
+          </StackPanel>
+          <ListBox x:Name="LibBox" SelectionMode="Multiple"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
+        </DockPanel>
+      </TabItem>
+
+      <!-- REQUESTS (v2.3) -->
+      <TabItem Header="Requests" x:Name="RequestsTab">
+        <DockPanel Margin="10">
+          <ScrollViewer DockPanel.Dock="Left" Width="330" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
+          <StackPanel>
+            <CheckBox x:Name="ReqEnable" Content="Song requests (!request / !sr, !queue, !skip, !wrongsong)"/>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Requests play" Width="150"/><ComboBox x:Name="ReqPlacement" Width="160"><ComboBoxItem Content="Next"/><ComboBoxItem Content="End"/></ComboBox></StackPanel>
+            <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Next = right after the current item. End = when the current playlist pass finishes."/>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Per-user queued limit" Width="150"/><TextBox x:Name="ReqPerUser" Width="60"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Per-user cooldown (s)" Width="150"/><TextBox x:Name="ReqCooldown" Width="60"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Max queue length" Width="150"/><TextBox x:Name="ReqMax" Width="60"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Max song length (min)" Width="150"/><TextBox x:Name="ReqMaxDur" Width="60"  ToolTip.Tip="0 = no limit"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Match strictness (0-1)" Width="150"/><TextBox x:Name="ReqScore" Width="60"  ToolTip.Tip="Minimum fuzzy-match score, default 0.55"/></StackPanel>
+            <CheckBox x:Name="ReqApproval" Content="Host must approve each request"/>
+            <TextBlock Text="Allowed users (blank = everyone)"/><TextBox x:Name="ReqAllowed"  ToolTip.Tip="Comma separated"/>
+            <TextBlock Text="Blocked users"/><TextBox x:Name="ReqBlocked"  ToolTip.Tip="Comma separated"/>
+            <CheckBox x:Name="ReqVoteSkip" Content="!skip vote skipping" Margin="6,10,0,4"/>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Votes needed" Width="150"/><TextBox x:Name="ReqVotes" Width="60"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="…or % of viewers" Width="150"/><TextBox x:Name="ReqPercent" Width="60"  ToolTip.Tip="0 = use the vote count. Uses the LIVE viewer count when known."/></StackPanel>
+            <CheckBox x:Name="ReqWrong" Content="!wrongsong (requester removes/skips their own)"/>
+            <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Margin="0,8,0,0" Text="Responses show on stream (chat-response overlay). They're only posted in chat if you turned on &quot;Reply in chat&quot; in Settings → Chat commands."/>
+            <Button Content="Save request settings" Click="ReqSave_Click"/>
+          </StackPanel>
+          </ScrollViewer>
+          <TextBlock x:Name="ReqNow" DockPanel.Dock="Top" FontWeight="Bold" TextWrapping="Wrap" Text="Not streaming."/>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+            <Button Content="Approve" Click="ReqApprove_Click"/>
+            <Button Content="Deny / remove" Click="ReqRemove_Click" Classes="secondary"/>
+            <Button Content="▲" Click="ReqUp_Click" Classes="secondary"/>
+            <Button Content="▼" Click="ReqDown_Click" Classes="secondary"/>
+            <Button Content="Clear" Click="ReqClear_Click" Classes="secondary"/>
+            <Button Content="Skip current" Click="Skip_Click" Classes="secondary" Margin="16,0,0,0"/>
+          </StackPanel>
+          <ListBox x:Name="ReqBox"/>
+        </DockPanel>
+      </TabItem>
+
+      <!-- VIEWERS (v2.3) -->
+      <TabItem Header="Viewers" x:Name="ViewersTab">
+        <DockPanel Margin="10">
+          <StackPanel DockPanel.Dock="Top">
+            <StackPanel Orientation="Horizontal">
+              <CheckBox x:Name="VwEnable" Content="Track viewers" Width="130"/>
+              <TextBlock Text="Source"/><ComboBox x:Name="VwSource" Width="140"><ComboBoxItem Content="Both"/><ComboBoxItem Content="LiveViewers"/><ComboBoxItem Content="RoomMembers"/></ComboBox>
+              <TextBlock Text="Leave after (s)" Margin="12,0,6,0"/><TextBox x:Name="VwGrace" Width="50"/>
+              <CheckBox x:Name="VwJoinAlert" Content="Welcome alert on stream" Margin="12,4,0,4"/>
+              <TextBox x:Name="VwJoinText" Width="200"  ToolTip.Tip="{}{user} = name, {viewers} = count"/>
+              <Button Content="Save" Click="VwSave_Click" Classes="secondary"/>
+            </StackPanel>
+            <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Names are read from the chat panel (LIVE → Viewers list, and the Room members list), so the 💬 Chat panel must be open. ⚠ The Viewers-list selectors are not verified against the live site yet. If nothing shows up, use Settings → Chat diagnostics and send the file. Long member lists are virtualized, so only the rows EpikChat has rendered are seen."/>
+            <TextBlock x:Name="VwSummary" FontWeight="Bold" Margin="0,4,0,4"/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+            <Button Content="Open profile in chat" Click="VwOpen_Click"  ToolTip.Tip="Clicks the name in EpikChat's own list (no moderation actions)"/>
+            <Button Content="Reset session" Click="VwReset_Click" Classes="secondary"/>
+          </StackPanel>
+          <ListBox x:Name="VwBox" FontFamily="DejaVu Sans Mono,Liberation Mono,monospace"/>
+        </DockPanel>
+      </TabItem>
+
+      <!-- STATS / LOG -->
+      <TabItem Header="Stats / Log" x:Name="StatsTab">
+        <Grid Margin="10">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="340"/></Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <UniformGrid Columns="5" Margin="0,0,10,0">
+              <StackPanel Margin="0,0,0,8"><TextBlock Text="FPS" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SFps" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="Bitrate" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SBitrate" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="Speed" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SSpeed" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="Uptime" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SUptime" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="Dropped / dup" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SDrop" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="Reconnects" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SReconn" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="Frames" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SFrames" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="Item" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SItem" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="Viewers (chat)" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SViewers" Text="–" FontSize="20"/></StackPanel>
+              <StackPanel><TextBlock Text="EpikChat status" Foreground="{DynamicResource Dim}"/><TextBlock x:Name="SLive" Text="–" FontSize="20"/></StackPanel>
+            </UniformGrid>
+            <TextBlock x:Name="SItemName" Foreground="{DynamicResource Dim}" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Text="Destinations" Foreground="{DynamicResource Dim}" Margin="0,8,0,2"/>
+            <ItemsControl x:Name="DestList" Margin="0,0,10,0"/>
+            <TextBlock Text="Bitrate (last 2 min)" Foreground="{DynamicResource Dim}" Margin="0,8,0,2"/>
+            <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" Background="{DynamicResource Input}" Height="90" Margin="0,0,10,0">
+              <Canvas x:Name="Graph" ClipToBounds="True">
+                <Polyline x:Name="GraphLine" Stroke="{DynamicResource Accent}" StrokeThickness="1.5"/>
+                <TextBlock x:Name="GraphMax" Canvas.Left="4" Canvas.Top="2" Foreground="{DynamicResource Dim}" FontSize="10"/>
+              </Canvas>
+            </Border>
+          </StackPanel>
+          <StackPanel Grid.Column="1">
+            <TextBlock Text="Preview (what's being sent, ~1 fps)" Foreground="{DynamicResource Dim}"/>
+            <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" Background="Black" Width="320" Height="180" HorizontalAlignment="Left" Margin="0,4,0,0">
+              <Image x:Name="PreviewImg" Stretch="Uniform"/>
+            </Border>
+          </StackPanel>
+          <TextBox x:Name="LogBox" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,10,0,0" IsReadOnly="True" FontFamily="DejaVu Sans Mono,Liberation Mono,monospace" FontSize="12"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" Background="{DynamicResource Input}" VerticalContentAlignment="Top"/>
+        </Grid>
+      </TabItem>
+    </TabControl>
+
+    <TextBlock x:Name="StatusText" Grid.Row="2" Grid.ColumnSpan="3" Text="Idle" Foreground="{DynamicResource Fg}" Margin="0,8,0,0"/>
+  </Grid>
+</Window>

@@ -1,0 +1,147 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using EpikStreamer.Browser;
+using EpikStreamer.Core;
+namespace EpikStreamer;
+
+/// <summary>
+/// Headless-ish self tests run against the real WebKitGTK host (needs a DISPLAY):
+///   --selftest-host                 protocol round-trip (eval, addScript, message bridge)
+///   --selftest-keyfetch DIR AUD     key-fetch automation against the mock go-live page (DIR = EpikStreamer.Tests/mock)
+///   --selftest-chat DIR OUT.json    chat observer against the mock chat page; writes page results + C#-received messages
+///   --selftest-secret               keyring/file secret store round-trip
+/// Only mock pages and fake keys are used.
+/// </summary>
+static class SelfTest
+{
+    static void P(string s) => Console.WriteLine(s);
+
+    public static async Task<int> Run(string[] args)
+    {
+        Environment.SetEnvironmentVariable("EPIK_TEST_ALLOW_FILE", "1");
+        try
+        {
+            return args[0] switch
+            {
+                "--selftest-host" => await Host(),
+                "--selftest-keyfetch" => await KeyFetch(args[1], args.Length > 2 ? args[2] : "Public"),
+                "--selftest-chat" => await Chat(args[1], args[2]),
+                "--selftest-secret" => Secret_(),
+                _ => Usage(),
+            };
+        }
+        finally { BrowserClient.Shutdown(); }
+    }
+    static int Usage() { P("usage: --selftest-host | --selftest-keyfetch MOCKDIR AUD | --selftest-chat MOCKDIR OUT | --selftest-secret"); return 2; }
+
+    static async Task<BrowserClient> Client()
+    {
+        var b = await BrowserClient.GetAsync() ?? throw new Exception("browser host unavailable: " + BrowserClient.Unavailable);
+        P("browser host ready, WebKitGTK " + b.EngineVersion);
+        return b;
+    }
+
+    static string Tmp(string name, string html)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "epik-selftest-" + Environment.ProcessId); Directory.CreateDirectory(dir);
+        if (!html.Contains("charset", StringComparison.OrdinalIgnoreCase)) html = "<meta charset=\"utf-8\">" + html;   // file:// pages default to Latin-1 in WebKit
+        var f = Path.Combine(dir, name); File.WriteAllText(f, html); return f;
+    }
+
+    static async Task<int> Host()
+    {
+        var b = await Client(); int fails = 0;
+        void Check(bool ok, string what) { P((ok ? "PASS " : "FAIL ") + what); if (!ok) fails++; }
+        var msgs = new List<string>(); b.Message += (v, u, d) => { lock (msgs) msgs.Add(d); };
+        var loaded = new TaskCompletionSource<string>(); b.Loaded += (v, u) => { if (v == "t" && u.StartsWith("file:")) loaded.TrySetResult(u); };
+        var page = Tmp("host.html", "<html><head><title>host</title></head><body><p id=x>hi</p><script>window.chrome.webview.postMessage({type:'hello',n:1});</script></body></html>");
+        b.Open("t", "selftest", 400, 300, show: false);
+        b.AddScript("t", "window.__early = 42;");
+        b.Navigate("t", "file://" + page);
+        Check(await Task.WhenAny(loaded.Task, Task.Delay(15000)) == loaded.Task, "loaded event for file page");
+        Check(await b.EvalAsync("t", "1+2") == "3", "eval number");
+        Check(await b.EvalAsync("t", "document.getElementById('x').textContent") == "\"hi\"", "eval string (DOM)");
+        Check(await b.EvalAsync("t", "({a:[1,'b']})") == "{\"a\":[1,\"b\"]}", "eval object → JSON");
+        Check(await b.EvalAsync("t", "undefined") is "null" or "", "eval undefined → null");
+        Check(await b.EvalAsync("t", "window.__early") == "42", "document-start script injected");
+        await Task.Delay(500);
+        lock (msgs) Check(msgs.Any(m => m.Contains("\"hello\"")), "chrome.webview.postMessage shim → host message");
+        try { await b.EvalAsync("t", "throw new Error('boom')"); Check(true, "eval exception reported without crashing host"); } catch (Exception ex) { Check(ex.Message.Contains("boom"), "eval exception surfaced: " + ex.Message); }
+        Check(await b.EvalAsync("t", "2*21") == "42", "host still alive after exception");
+        b.Close("t");
+        return fails;
+    }
+
+    static async Task<int> KeyFetch(string mockDir, string aud)
+    {
+        var html = File.ReadAllText(Path.Combine(mockDir, "epikchat-golive.html"));
+        // the page's own runner + helper are for the Chrome test; here C# (KeyFetcher) drives the steps through WebKit
+        html = Regex.Replace(html, @"<script src=""helper.js""></script>\s*<script>.*?</script>", "", RegexOptions.Singleline);
+        var f = Tmp("golive.html", html);
+        var b = await Client();
+        b.Open("signin", "selftest sign-in", 1000, 760);
+        var kf = new KeyFetcher(b, "signin") { ChatUrl = "file://" + f, SettleMs = 800 };
+        kf.Status = (s, err) => P((err ? "  ! " : "  · ") + s);
+        var loaded = new TaskCompletionSource(); void H(string v, string u) { if (v == "signin") loaded.TrySetResult(); }
+        b.Loaded += H; b.Navigate("signin", "file://" + f); await Task.WhenAny(loaded.Task, Task.Delay(15000)); b.Loaded -= H;
+        var ok = await kf.RunAsync(aud);
+        string Ev(string js) => b.EvalAsync("signin", js).GetAwaiter().GetResult();
+        var chosen = Ev("window.__chosen || ''"); var audience = Ev("window.__audience || ''"); var creates = Ev("window.__creates || 0");
+        P($"  chosen={chosen} audience={audience} creates={creates} server={kf.ServerUrl} key={(kf.StreamKey is { Length: > 4 } k ? "••••" + k[^4..] : "-")}");
+        bool pass = ok && chosen.Contains("RTMP encoder") && audience.Contains(aud) && creates == "1"
+                    && kf.ServerUrl == "rtmp://media.epikchat.com:1935/x" && kf.StreamKey == "FAKE_mock_Key_12345abc";
+        P((pass ? "PASS" : "FAIL") + " mock key fetch via WebKitGTK host, audience=" + aud);
+        b.Close("signin");
+        return pass ? 0 : 1;
+    }
+
+    static async Task<int> Chat(string mockDir, string outFile)
+    {
+        var html = File.ReadAllText(Path.Combine(mockDir, "epikchat-chat.html"));
+        html = html.Replace("<script src=\"chat-observer.js\"></script>", "");   // ChatPanel injects the observer at document start instead
+        var f = Tmp("chat.html", html);
+        var received = new List<ChatMessage>(); var statuses = new List<string>(); var viewers = new List<string[]>();
+        var chat = new ChatPanel { ChatUrl = "file://" + f, DebugMessages = true, SelfName = "" };
+        chat.MessageReceived += m => { lock (received) received.Add(m); };
+        chat.ObserverStatus += s => { lock (statuses) statuses.Add(s); };
+        chat.ViewersReceived += (src, n) => { lock (viewers) viewers.Add(new[] { src, string.Join(",", n) }); };
+        chat.Note += n => { if (n.Length > 0) P("  note: " + n); };
+        await chat.SetActive(true);
+        var b = await Client();
+        // the mock's scripted timeline runs ~12 s; wait for its final title
+        string title = "";
+        for (int i = 0; i < 60; i++)
+        {
+            await Task.Delay(500);
+            title = await b.EvalAsync("chat", "document.title");
+            if (title.Contains("posted") && title.Contains("openRes")) { await Task.Delay(1500); title = await b.EvalAsync("chat", "document.title"); if (title.Contains("sendResult")) break; }
+        }
+        var t = JsonSerializer.Deserialize<string>(title) ?? "";
+        List<object> recv; lock (received) recv = received.Select(m => (object)new { user = m.User, text = m.Text, id = m.Id, isBot = m.IsBot, self = m.Self, room = m.Room }).ToList();
+        File.WriteAllText(outFile, JsonSerializer.Serialize(new { page = JsonDocument.Parse(t.Length > 0 ? t : "{}").RootElement, received = recv, statuses, viewers }));
+        P($"  page title {t.Length} chars, C# received {recv.Count} chat messages, {statuses.Count} statuses, {viewers.Count} viewer snapshots → {outFile}");
+        await chat.SetActive(false);
+        return t.Length > 0 ? 0 : 1;
+    }
+
+    static int Secret_()
+    {
+        int fails = 0; void Check(bool ok, string what) { P((ok ? "PASS " : "FAIL ") + what); if (!ok) fails++; }
+        LinuxSecretStore.Install();
+        const string fake = "FAKE_selftest_key_0000";
+        var a = Secret.Protect(fake); var a2 = Secret.Protect(fake);
+        P("  backend: " + LinuxSecretStore.Backend + "  stored form: " + (a?.Split(':')[0] ?? "null"));
+        Check(a != null && !a.Contains(fake), "protected value does not contain the plaintext");
+        Check(Secret.Unprotect(a) == fake, "round-trip");
+        if (a!.StartsWith("ls:")) Check(a == a2, "same secret → same keyring item id (no keyring pile-up)");
+        else Check(a != a2 && Secret.Unprotect(a2) == fake, "AES-GCM fallback uses a fresh nonce per save");
+        Check(Secret.Unprotect("garbage") == "" || Secret.Unprotect("garbage") != fake, "garbage → not the secret");
+        if (File.Exists(LinuxSecretStore.KeyFile))
+        {
+            var mode = File.GetUnixFileMode(LinuxSecretStore.KeyFile);
+            Check(mode == (UnixFileMode.UserRead | UnixFileMode.UserWrite), $"fallback key file mode is 0600 ({mode})");
+        }
+        LinuxSecretStore.Forget(a);
+        return fails;
+    }
+}
