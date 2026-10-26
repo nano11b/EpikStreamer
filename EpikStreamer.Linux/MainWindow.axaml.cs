@@ -91,7 +91,7 @@ public partial class MainWindow : Window
         TxtCorner.SelectedItem = o.TextCorner; TxtBox.IsChecked = o.TextBackground; TxtTicker.IsChecked = o.Ticker; TxtSpeed.Text = o.TickerSpeed.ToString();
         FontPath.Text = o.FontFile;
         ClkEnable.IsChecked = o.ClockEnabled; ClkFormat.Text = o.ClockFormat; ClkSize.Text = o.ClockFontSize.ToString(); ClkCorner.SelectedItem = o.ClockCorner;
-        LoadAudio(p); LoadNowPlaying(p);
+        LoadAudio(p); LoadNowPlaying(p); LoadBallPit(p);
         _loading = false;
     }
 
@@ -122,7 +122,7 @@ public partial class MainWindow : Window
         o.Ticker = TxtTicker.IsChecked == true; o.TickerSpeed = Int(TxtSpeed.Text, 120, 10, 5000); o.FontFile = FontPath.Text.Trim();
         o.ClockEnabled = ClkEnable.IsChecked == true; o.ClockFormat = ClkFormat.Text; o.ClockFontSize = Int(ClkSize.Text, 28, 6, 400);
         o.ClockCorner = (Corner)(ClkCorner.SelectedItem ?? Corner.TopLeft);
-        SaveAudio(p); SaveNowPlaying(p);
+        SaveAudio(p); SaveNowPlaying(p); if (_pit != null) SaveBallPit(p);
     }
 
     void Persist()
@@ -293,7 +293,7 @@ public partial class MainWindow : Window
         var p = _cur;
         var playlistOverride = _playlistOverride; _playlistOverride = null;
         if (playlistOverride != null) { p = p.Clone(p.Name); p.Playlist = playlistOverride; }
-        if (p.Playlist.Count == 0) { Warn("Add at least one video to the playlist."); Tabs.SelectedIndex = 0; return; }
+        if (p.Playlist.Count == 0 && p.BallPit.Mode != "Source") { Warn("Add at least one video to the playlist."); Tabs.SelectedIndex = 0; return; }
         var missing = p.Playlist.Where(f => !File.Exists(f)).ToList();
         if (missing.Count == p.Playlist.Count) { Warn("None of the playlist files exist."); return; }
         var dests = new List<CommandBuilder.Destination>(); var secrets = new List<string>(); var destNames = new List<string>();
@@ -340,6 +340,7 @@ public partial class MainWindow : Window
         {
             _engine = new StreamEngine(run, ff, dests, secrets);
             HookEngine23(_engine);
+            _engine.BallPit = run.BallPit.Active ? _pit?.Scene : null; _bpSeq = -1;
             _engine.TextOverlays = (chatCfg.CommandsEnabled && chatCfg.ShowOnStream) || chatCfg.AlertsEnabled;
             _engine.SetMusicMuted(_musicMuted); _engine.SetMicMuted(_micMuted); _engine.SetOverlaysHidden(_overlaysHidden);
             BeginSession(run, destNames);
@@ -562,7 +563,7 @@ public partial class MainWindow : Window
         SViewers.Text = viewers?.ToString() ?? "–";
         OnViewerCount(viewers);
         SLive.Text = ChatToggle.IsChecked != true ? "–" : live ? "🔴 LIVE" : "offline";
-        Title = "EpikStreamer 2.4.1" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
+        Title = "EpikStreamer 2.5.0" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
     }
 
     // ---------- updates ----------

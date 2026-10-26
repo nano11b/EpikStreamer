@@ -13,7 +13,18 @@ public static class CommandBuilder
 
     /// <summary>v2.2 live features of one encoder run. ControlPort 0 = no runtime control (azmq).</summary>
     public record LiveOptions(int ControlPort = 0, int MusicPort = 0, string? MicDevice = null, bool TextOverlays = false,
-                              double MusicVolume = 0.25, double MicVolume = 1.0, double MainVolume = 1.0, bool Card = false);
+                              double MusicVolume = 0.25, double MicVolume = 1.0, double MainVolume = 1.0, bool Card = false,
+                              int BallPitPort = 0, string BallPitMode = "", int BallPitW = 0, int BallPitH = 0);
+
+    /// <summary>v2.5 Ball Pit input: raw BGRA (premultiplied) frames the app renders and pushes over a local TCP socket.</summary>
+    public static List<string> BallPitInputArgs(int port, int w, int h, int fps, FfmpegCaps? caps = null)
+    {
+        var a = new List<string>();
+        if ((caps ?? FfmpegCaps.All).InputThreadQueue) a.AddRange(new[] { "-thread_queue_size", "16" });
+        a.AddRange(new[] { "-f", "rawvideo", "-pix_fmt", "bgra", "-video_size", $"{w}x{h}", "-framerate", fps.ToString(Inv),
+            "-i", $"tcp://127.0.0.1:{port}?listen=1&listen_timeout=20000" });
+        return a;
+    }
 
     /// <summary>Input args for the mic. "lavfi:&lt;graph&gt;" is a test hook; anything else is a dshow device name.</summary>
     public static List<string> MicInputArgs(string device, FfmpegCaps? caps = null)
@@ -206,12 +217,24 @@ public static class CommandBuilder
         return args;
     }
 
-    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1, FfmpegCaps? caps = null, int cardIdx = -1)
+    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1, FfmpegCaps? caps = null, int cardIdx = -1, int pitIdx = -1)
     {
         var o = p.Overlays; var f = new List<string>(); string cur = "[v0]";
-        f.Add($"[0:v]setpts=PTS-STARTPTS,fps={p.Fps}[v0]");  // timestamp based: robust to partial (skipped) segments
+        bool pitScale = lo != null && (lo.BallPitW != p.Width || lo.BallPitH != p.Height);
+        string pitIn = pitIdx < 0 ? "" : $"[{pitIdx}:v]setpts=PTS-STARTPTS" + (pitScale ? $",scale={p.Width}:{p.Height}:flags=bilinear" : "");
+        if (pitIdx >= 0 && lo?.BallPitMode == "Source")
+        {   // v2.5: the ball pit IS the picture; the playlist (or the silent filler) only provides audio + the timeline
+            f.Add("[0:v]nullsink");
+            f.Add($"{pitIn},fps={p.Fps},format=yuv420p,setsar=1[v0]");
+        }
+        else f.Add($"[0:v]setpts=PTS-STARTPTS,fps={p.Fps}[v0]");  // timestamp based: robust to partial (skipped) segments
         int n = 1;
         string Next() => $"[v{n++}]";
+        if (pitIdx >= 0 && lo?.BallPitMode == "Overlay")
+        {   // v2.5: transparent ball pit on top of the playlist video (under the logo/text/clock)
+            f.Add($"{pitIn},format=gbrap,unpremultiply=inplace=1[pit]");   // renderer writes premultiplied BGRA; overlay blends straight alpha correctly in YUV
+            var nx = Next(); f.Add($"{cur}[pit]overlay@pit=x=0:y=0:eof_action=pass:format=auto{nx}"); cur = nx;
+        }
         if (hasLogo)
         {
             int lw = Math.Max(2, (int)(p.Width * Math.Clamp(o.ImageScale, 0.01, 1.0)));
@@ -307,7 +330,9 @@ public static class CommandBuilder
         if (!string.IsNullOrWhiteSpace(lo?.MicDevice)) { a.AddRange(MicInputArgs(lo.MicDevice!, c)); micIdx = next++; }
         int cardIdx = -1;
         if (lo is { Card: true }) { a.AddRange(NowPlayingCard.InputArgs()); cardIdx = next++; }
-        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx, c, cardIdx), "-map", "[vout]", "-map", "[aout]" });
+        int pitIdx = -1;
+        if (lo is { BallPitPort: > 0 }) { a.AddRange(BallPitInputArgs(lo.BallPitPort, lo.BallPitW, lo.BallPitH, p.Fps, c)); pitIdx = next++; }
+        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx, c, cardIdx, pitIdx), "-map", "[vout]", "-map", "[aout]" });
         a.AddRange(VideoEncoderArgs(p, c));
         a.AddRange(new[] { "-c:a", "aac", "-b:a", p.AudioKbps + "k", "-ar", "44100", "-ac", "2" });
         if (dests.Count == 1 && !dests[0].IsRecording)

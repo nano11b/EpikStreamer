@@ -27,6 +27,7 @@ static class SelfTest
                 "--selftest-keyfetch" => await KeyFetch(args[1], args.Length > 2 ? args[2] : "Public"),
                 "--selftest-chat" => await Chat(args[1], args[2]),
                 "--selftest-golive" => await GoLive(args[1]),
+                "--selftest-members" => await Members(args[1], args[2]),
                 "--selftest-secret" => Secret_(),
                 _ => Usage(),
             };
@@ -123,6 +124,30 @@ static class SelfTest
         P($"  page title {t.Length} chars, C# received {recv.Count} chat messages, {statuses.Count} statuses, {viewers.Count} viewer snapshots → {outFile}");
         await chat.SetActive(false);
         return t.Length > 0 ? 0 : 1;
+    }
+
+    /// <summary>v2.5 Ball Pit: the member collector through the real ChatPanel/WebKitGTK host (virtualized list mock), plus the
+    /// avatar-fetch fallback. Writes the page's own record (checked by members-check.py) and the C# side to outFile.</summary>
+    static async Task<int> Members(string mockDir, string outFile)
+    {
+        var html = File.ReadAllText(Path.Combine(mockDir, "epikchat-members.html")).Replace("<script src=\"chat-observer.js\"></script>", "");
+        var f = Tmp("members.html", html);
+        var scans = new List<object>();
+        var chat = new ChatPanel { ChatUrl = "file://" + f, DebugMessages = true, SelfName = "" };
+        chat.MembersReceived += (l, complete, total, found) => { lock (scans) scans.Add(new { n = l.Count, complete, total, found, avatars = l.Count(m => !string.IsNullOrEmpty(m.Avatar)), colors = l.Count(m => !string.IsNullOrEmpty(m.Color)), m1 = l.FirstOrDefault(m => m.Name == "member001") }); };
+        await chat.SetActive(true);
+        var b = await Client();
+        string title = "";
+        for (int i = 0; i < 120 && !title.Contains("\"done\""); i++) { await Task.Delay(500); title = await b.EvalAsync("chat", "document.title"); }
+        var png = await b.EvalAsync("chat", "window.__pngUrl");
+        var bytes = await chat.FetchAvatarViaPage(JsonSerializer.Deserialize<string>(png) ?? "");
+        var t = JsonSerializer.Deserialize<string>(title) ?? "";
+        List<object> sc; lock (scans) sc = scans.ToList();
+        File.WriteAllText(outFile + ".page.json", t);
+        File.WriteAllText(outFile, JsonSerializer.Serialize(new { scans = sc, avatarBytes = bytes?.Length ?? -1, avatarIsPng = bytes is { Length: > 8 } && bytes[1] == (byte)'P' && bytes[2] == (byte)'N' && bytes[3] == (byte)'G' }));
+        P($"  page title {t.Length} chars, C# got {sc.Count} member scans, avatar fetch {bytes?.Length ?? -1} bytes → {outFile}");
+        await chat.SetActive(false);
+        return t.Contains("\"done\"") ? 0 : 1;
     }
 
     /// <summary>v2.4.1: LiveSession (the Start-button "Go live" automation) through the real ChatPanel/WebKitGTK host against the

@@ -8,6 +8,9 @@ var mode = args.Length > 0 ? args[0] : "unit";
 int fails = 0;
 if (mode is "unit" or "v22") Os.Windows = true;   // these modes assert the Windows (dshow / setup.exe) code paths; Linux paths are checked separately below
 var FF = Environment.GetEnvironmentVariable("FFMPEG") ?? "/usr/bin/ffmpeg";
+if (mode == "ballpit") return BallPitTests.Unit();
+if (mode == "ballpit-bench") return BallPitTests.Bench(Environment.GetEnvironmentVariable("OUT") ?? "/workspace/rel/v2.5.0");
+if (mode == "ballpit-encode") return BallPitTests.Encode(FF, dir, Environment.GetEnvironmentVariable("OUT") ?? $"{dir}/ballpit.mp4", Environment.GetEnvironmentVariable("PITMODE") ?? "Source");
 void Check(bool ok, string what) { Console.WriteLine((ok ? "PASS " : "FAIL ") + what); if (!ok) fails++; }
 
 Profile MakeProfile()

@@ -1,5 +1,5 @@
 <Window x:Class="EpikStreamer.MainWindow" xmlns="https://github.com/avaloniaui" xmlns:local="clr-namespace:EpikStreamer"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer 2.4.1" Width="1280" Height="760" MinWidth="820" MinHeight="600"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer 2.5.0" Width="1280" Height="760" MinWidth="820" MinHeight="600"
         Background="{DynamicResource Bg}" Icon="/Assets/icon.png">
   <Grid Margin="12">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -538,6 +538,64 @@
             <Button Content="Reset session" Click="VwReset_Click" Classes="secondary"/>
           </StackPanel>
           <ListBox x:Name="VwBox" FontFamily="DejaVu Sans Mono,Liberation Mono,monospace"/>
+        </DockPanel>
+      </TabItem>
+
+      <!-- BALL PIT (v2.5) -->
+      <TabItem Header="Ball Pit" x:Name="BallPitTab">
+        <DockPanel Margin="10">
+          <StackPanel DockPanel.Dock="Top">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Mode" Margin="0,0,6,0"/>
+              <ComboBox x:Name="BpMode" Width="250" SelectionChanged="BpChanged"><ComboBoxItem Content="Off" Tag="Off"/><ComboBoxItem Content="Source (replaces the video)" Tag="Source"/><ComboBoxItem Content="Overlay (on top of the playlist)" Tag="Overlay"/></ComboBox>
+              <TextBlock Text="Max balls" Margin="12,0,6,0"/><TextBox x:Name="BpMax" Width="50" ToolTip.Tip="Up to 300; extra people wait for a free slot"/>
+              <TextBlock Text="Render" Margin="12,0,6,0"/>
+              <ComboBox x:Name="BpScale" Width="90" SelectionChanged="BpChanged" ToolTip.Tip="Render below the output size and let ffmpeg scale it up (saves CPU)"><ComboBoxItem Content="100%" Tag="1"/><ComboBoxItem Content="75%" Tag="0.75"/><ComboBoxItem Content="50%" Tag="0.5"/></ComboBox>
+              <Button Content="Save" Click="BpSave_Click" Classes="secondary"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <TextBlock Text="Ball size" Width="70"/><Slider x:Name="BpSize" Width="110" Minimum="0.2" Maximum="1.5" ValueChanged="BpSlider"/>
+              <TextBlock Text="Gravity" Width="60" Margin="10,0,0,0"/><Slider x:Name="BpGravity" Width="110" Minimum="2" Maximum="40" ValueChanged="BpSlider"/>
+              <TextBlock Text="Bounce" Width="55" Margin="10,0,0,0"/><Slider x:Name="BpBounce" Width="110" Minimum="0" Maximum="0.95" ValueChanged="BpSlider"/>
+              <TextBlock Text="Friction" Width="60" Margin="10,0,0,0"/><Slider x:Name="BpFriction" Width="110" Minimum="0" Maximum="3" ValueChanged="BpSlider"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <TextBlock Text="Camera tilt" Width="70"/><Slider x:Name="BpPitch" Width="110" Minimum="5" Maximum="60" ValueChanged="BpSlider"/>
+              <TextBlock Text="Zoom" Width="60" Margin="10,0,0,0"/><Slider x:Name="BpZoom" Width="110" Minimum="0.6" Maximum="1.8" ValueChanged="BpSlider"/>
+              <TextBlock Text="Angle" Width="55" Margin="10,0,0,0"/><Slider x:Name="BpYaw" Width="110" Minimum="-60" Maximum="60" ValueChanged="BpSlider"/>
+              <CheckBox x:Name="BpOrbit" Content="Orbit" Margin="10,0,0,0" Click="BpCheck"/><TextBox x:Name="BpOrbitSpeed" Width="40" ToolTip.Tip="Orbit speed (degrees per second)"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <CheckBox x:Name="BpRoom" Content="Room" Click="BpCheck"/>
+              <CheckBox x:Name="BpLabels" Content="Names" Margin="8,0,0,0" Click="BpCheck"/>
+              <CheckBox x:Name="BpCount" Content="Count" Margin="8,0,0,0" Click="BpCheck"/>
+              <TextBlock Text="Background" Margin="12,0,6,0"/><TextBox x:Name="BpBg" Width="80" ToolTip.Tip="#RRGGBB (Source mode)"/>
+              <TextBlock Text="Floor" Margin="8,0,6,0"/><TextBox x:Name="BpFloor" Width="80"/>
+              <TextBlock Text="Walls" Margin="8,0,6,0"/><TextBox x:Name="BpWall" Width="80"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <CheckBox x:Name="BpJoin" Content="Join drop-ins" Click="BpCheck"/>
+              <CheckBox x:Name="BpLeave" Content="Leave pops" Margin="8,0,0,0" Click="BpCheck"/>
+              <CheckBox x:Name="BpBubbles" Content="Chat bubbles + jump" Margin="8,0,0,0" Click="BpCheck"/>
+              <CheckBox x:Name="BpCmds" Content="!bounce !bigball !color !shake" Margin="8,0,0,0" Click="BpCheck" ToolTip.Tip="Uses the chat command system (Settings → chat commands must be on); per-user cooldown = the command cooldown; never replies in chat"/>
+              <CheckBox x:Name="BpShakeHost" Content="!shake host only" Margin="8,0,0,0" Click="BpCheck"/>
+              <TextBlock Text="cooldown (s)" Margin="6,0,6,0"/><TextBox x:Name="BpShakeCd" Width="40"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <CheckBox x:Name="BpViewers" Content="Include LIVE viewers" Click="BpCheck"/>
+              <CheckBox x:Name="BpChatters" Content="Include chat authors for" Margin="8,0,0,0" Click="BpCheck"/><TextBox x:Name="BpChatMin" Width="40"/><TextBlock Text="min" Margin="4,0,0,0"/>
+              <TextBlock Text="Full member scan every (s)" Margin="12,0,6,0"/><TextBox x:Name="BpScan" Width="50"/>
+            </StackPanel>
+            <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Margin="0,4,0,0" Text="Everyone in the Room members list (scrolled through in the open 💬 Chat panel, read-only), LIVE viewers and recent chat authors become balls with their avatar and name colour. ⚠ The avatar / name-colour / member-count selectors are not verified against the live site yet; Settings → Chat diagnostics shows what matched (ballPit block)."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+            <Button Content="Add 10 test users" Click="BpTest_Click"/>
+            <Button Content="Remove test users" Click="BpClearTest_Click" Classes="secondary"/>
+            <Button Content="Scan members now" Click="BpScanNow_Click" Classes="secondary"/>
+            <Button Content="!shake" Click="BpShake_Click" Classes="secondary"/>
+            <TextBlock x:Name="BpStatus" FontWeight="Bold" Margin="12,0,0,0" VerticalAlignment="Center"/>
+          </StackPanel>
+          <Border Background="#000000" Margin="0,6,0,0"><Image x:Name="BpPreview" Stretch="Uniform"/></Border>
         </DockPanel>
       </TabItem>
 

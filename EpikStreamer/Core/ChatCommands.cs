@@ -15,12 +15,35 @@ public sealed class ChatCommands
     readonly Queue<string> _ownReplies = new();
     public ChatCommands(ChatSettings s) => _s = s;
 
-    public IEnumerable<string> Triggers => new[] { "!song", "!uptime", "!help" }.Concat(_s.Custom.Where(c => c.Enabled).Select(c => c.Trigger.Trim().ToLowerInvariant()));
+    /// <summary>v2.5 Ball Pit hook: (user, command, argument, isHost) → handled. Runs with a per-user cooldown and never replies in chat.</summary>
+    public Func<string, string, string, bool, bool>? BallPit { get; set; }
+    public bool BallPitListed { get; set; } = true;
+    readonly Dictionary<string, DateTime> _pitLast = new(StringComparer.OrdinalIgnoreCase);
+    bool TryBallPit(ChatMessage m, bool host, DateTime now)
+    {
+        var text = m.Text.Trim();
+        if (!text.StartsWith('!')) return false;
+        var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var cmd = parts[0].ToLowerInvariant();
+        if (!BallPitScene.CommandNames.Contains(cmd)) return false;
+        if (m.Id != null && _seen.Contains(m.Id)) return true;
+        if (m.Id != null) { _seen.Add(m.Id); _seenQ.Enqueue(m.Id); if (_seenQ.Count > 500) _seen.Remove(_seenQ.Dequeue()); }
+        var key = m.User.Trim() + " " + cmd;
+        if (!host && _pitLast.TryGetValue(key, out var t) && (now - t).TotalSeconds < _s.CooldownSeconds) return true;
+        if (!BallPit!(m.User.Trim(), cmd, parts.Length > 1 ? parts[1].Trim() : "", host)) return false;   // ball pit off → normal handling
+        _pitLast[key] = now; if (_pitLast.Count > 2000) _pitLast.Clear();
+        return true;
+    }
+
+    public IEnumerable<string> Triggers => new[] { "!song", "!uptime", "!help" }.Concat(BallPit != null && BallPitListed ? BallPitScene.CommandNames : Array.Empty<string>()).Concat(_s.Custom.Where(c => c.Enabled).Select(c => c.Trigger.Trim().ToLowerInvariant()));
 
     /// <summary>Returns the response for a message or null (not a command, cooldown, duplicate, or our own reply).</summary>
     public string? Handle(ChatMessage m, Context ctx, DateTime now)
     {
-        if (!_s.CommandsEnabled || string.IsNullOrWhiteSpace(m.Text) || m.IsBot || m.Self) return null;
+        if (!_s.CommandsEnabled || string.IsNullOrWhiteSpace(m.Text) || m.IsBot) return null;
+        bool host = m.Self || (_s.MyUsername.Length > 0 && string.Equals(m.User.Trim(), _s.MyUsername.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (BallPit != null && TryBallPit(m, host, now)) return null;   // Ball Pit commands never post a chat reply
+        if (m.Self) return null;
         if (_s.MyUsername.Length > 0 && string.Equals(m.User.Trim(), _s.MyUsername.Trim(), StringComparison.OrdinalIgnoreCase)) return null;
         if (m.Id != null) { if (!_seen.Add(m.Id)) return null; _seenQ.Enqueue(m.Id); if (_seenQ.Count > 500) _seen.Remove(_seenQ.Dequeue()); }
         var text = m.Text.Trim();

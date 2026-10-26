@@ -97,7 +97,7 @@ public partial class MainWindow
         c.Milestones = MilestonesBox.Text.Split(',', ';', ' ').Select(x => int.TryParse(x.Trim(), out var v) ? v : 0).Where(v => v > 0).Distinct().OrderBy(v => v).ToList();
         RebuildChatEngines();
     }
-    void RebuildChatEngines() { _commands = new ChatCommands(_store.Chat); _alerts = new ViewerAlerts(_store.Chat); }
+    void RebuildChatEngines() { _commands = new ChatCommands(_store.Chat); _alerts = new ViewerAlerts(_store.Chat); HookBallPitCommands(); }
 
     void LoadAudio(Profile p)
     {

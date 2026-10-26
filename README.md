@@ -1,4 +1,4 @@
-# EpikStreamer 2.4.0
+# EpikStreamer 2.5.0
 
 Desktop app for Windows (WPF, .NET 8) and **Linux** (Avalonia, .NET 8; Debian/Ubuntu .deb or portable tar.gz) that streams local video files to RTMP ingests such as EpikChat's
 **Go live → RTMP encoder** (server `rtmp://media.epikchat.com:1935/x` + your stream key) using ffmpeg.
@@ -7,24 +7,24 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 ## Downloads (GitHub Releases: https://github.com/nano11b/EpikStreamer/releases)
 | Package | Contents |
 |---|---|
-| `EpikStreamer-2.4.0-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
-| `EpikStreamer-v2.4.0-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
-| `EpikStreamer-v2.4.0-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
-| `epikstreamer_2.4.0_amd64.deb` / `epikstreamer_2.4.0_arm64.deb` | **Linux (Debian 12+, Ubuntu 22.04+, Mint, Raspberry Pi OS 64-bit).** Self-contained app (no .NET needed); ffmpeg, WebKitGTK and libsecret come from your distro. |
-| `epikstreamer-2.4.0-linux-amd64.tar.gz` / `-linux-arm64.tar.gz` | Portable Linux build for other distros. See `INSTALL-LINUX.txt` inside. |
+| `EpikStreamer-2.5.0-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
+| `EpikStreamer-v2.5.0-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
+| `EpikStreamer-v2.5.0-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
+| `epikstreamer_2.5.0_amd64.deb` / `epikstreamer_2.5.0_arm64.deb` | **Linux (Debian 12+, Ubuntu 22.04+, Mint, Raspberry Pi OS 64-bit).** Self-contained app (no .NET needed); ffmpeg, WebKitGTK and libsecret come from your distro. |
+| `epikstreamer-2.5.0-linux-amd64.tar.gz` / `-linux-arm64.tar.gz` | Portable Linux build for other distros. See `INSTALL-LINUX.txt` inside. |
 
 ## Install on Linux
 Debian / Ubuntu / Mint / Raspberry Pi OS (pick `amd64` or `arm64`, see `dpkg --print-architecture`):
 ```
-wget https://github.com/nano11b/EpikStreamer/releases/download/v2.4.0/epikstreamer_2.4.0_amd64.deb
+wget https://github.com/nano11b/EpikStreamer/releases/download/v2.5.0/epikstreamer_2.5.0_amd64.deb
 sha256sum -c --ignore-missing SHA256SUMS-linux.txt     # optional, after downloading SHA256SUMS-linux.txt too
-sudo apt install ./epikstreamer_2.4.0_amd64.deb
+sudo apt install ./epikstreamer_2.5.0_amd64.deb
 epikstreamer        # or "EpikStreamer" in your applications menu
 ```
 Remove it with `sudo apt remove epikstreamer`. Your settings stay in `~/.config/EpikStreamer`.
 
 Other distros: install `ffmpeg`, WebKitGTK 4.1 (`webkit2gtk4.1` / `webkit2gtk-4.1`), `libsecret` and GTK 3, then
-`tar xzf epikstreamer-2.4.0-linux-amd64.tar.gz && ./epikstreamer-2.4.0/epikstreamer`.
+`tar xzf epikstreamer-2.5.0-linux-amd64.tar.gz && ./epikstreamer-2.5.0/epikstreamer`.
 
 Linux notes:
 - Hardware encoding: NVIDIA → NVENC (proprietary driver). Intel/AMD → VA-API: install `intel-media-va-driver` or `mesa-va-drivers`, and make sure your user is in the `render` group. **Auto-detect** on the Output / Encoder tab picks whichever works, falling back to x264.
@@ -44,6 +44,14 @@ Linux notes:
 - **Profiles**: named profiles (outputs, recording, encoder, resolution/fps/bitrates, overlays, playlist) with New / Rename / Duplicate / Delete and a quick-switch dropdown.
   Saved to `%APPDATA%\EpikStreamer\profiles.json`. Stream keys are saved only when **Remember keys** is ticked, and then it's encrypted with Windows DPAPI (CurrentUser). Otherwise it's kept in memory for the session only.
   A v1 `settings.json` is migrated into a profile named **Default**, and v2.0 profiles (one server + key) become a single EpikChat output.
+
+## New in 2.5
+- **Ball Pit** tab: every room member, LIVE viewer or recent chatter becomes a bouncy 3D ball with their avatar and name color.
+  - Joiners drop in, leavers pop, and chat makes a ball jump with a speech bubble.
+  - Chat commands `!bounce`, `!bigball`, `!color <#hex>` and `!shake` change the balls.
+  - Stream it as the whole video (**Source**) or as a transparent **Overlay** on your playlist.
+  - The tab has a live preview and test users.
+  - ⚠ The avatar and name-color selectors are untested against the live site; see `CHANGELOG.md`.
 
 ## New in 2.4.1
 - **Start opens the EpikChat live session automatically.** No more clicking the camera icon first. It also runs on reconnects and scheduled starts. It's controlled by *Output → Open Go live on EpikChat automatically when starting* (on by default).
@@ -138,7 +146,7 @@ dotnet publish EpikStreamer -c Release -r win-x64 --self-contained false -p:Publ
 Requires the .NET 8 SDK, `dpkg-deb` and `fakeroot` (`lintian` is optional).
 ```
 dotnet run --project EpikStreamer.Linux                       # run from source (needs libwebkit2gtk-4.1-0, ffmpeg)
-packaging/linux/build-deb.sh 2.4.0 dist/linux                 # amd64 + arm64 .deb, tar.gz, SHA256SUMS-linux.txt
+packaging/linux/build-deb.sh 2.5.0 dist/linux                 # amd64 + arm64 .deb, tar.gz, SHA256SUMS-linux.txt
 EpikStreamer.Tests/mock/run-linux-host.sh                     # WebKitGTK host, mock key fetch and mock chat through the Linux app
 ```
 

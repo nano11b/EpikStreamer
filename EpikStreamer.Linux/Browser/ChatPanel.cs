@@ -94,6 +94,29 @@ public class ChatPanel
                 ViewersReceived?.Invoke(Str("source"), names);
                 return;
             }
+            if (type == "epik-members")   // v2.5 Ball Pit roster
+            {
+                var list = new List<Core.BallPitRoster.Member>();
+                if (r.TryGetProperty("members", out var ma) && ma.ValueKind == JsonValueKind.Array)
+                    foreach (var m in ma.EnumerateArray())
+                    {
+                        if (m.ValueKind != JsonValueKind.Object) continue;
+                        string S2(string k) => m.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.String ? x.GetString() ?? "" : "";
+                        var nm = S2("name").Trim(); if (nm.Length is 0 or > 64) continue;
+                        var av = S2("avatar"); if (!(av.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || av.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) || av.Length > 2000) av = "";
+                        var col = S2("color"); if (col.Length > 40) col = "";
+                        list.Add(new(nm, av.Length > 0 ? av : null, col.Length > 0 ? col : null));
+                    }
+                int total = r.TryGetProperty("total", out var tt) && tt.ValueKind == JsonValueKind.Number ? tt.GetInt32() : 0;
+                MembersReceived?.Invoke(list, Bool("complete"), total, Bool("found"));
+                return;
+            }
+            if (type == "epik-avatar")
+            {
+                var aurl = Str("url"); var adata = Str("data");
+                lock (_avWait) if (_avWait.Remove(aurl, out var atcs)) atcs.TrySetResult(adata.StartsWith("data:image/", StringComparison.Ordinal) ? adata : null);
+                return;
+            }
             if (type != "epik-status") return;
             int? viewers = r.TryGetProperty("viewers", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
             bool live = r.TryGetProperty("live", out var l) && l.ValueKind == JsonValueKind.True;
@@ -183,5 +206,29 @@ public class ChatPanel
         await _b.ClearDataAsync();
         if (_wantVisible) _b.Navigate(View, ChatUrl);
         return true;
+    }
+
+    // ---- v2.5 Ball Pit ----
+    /// <summary>(members, complete, total shown by the page, list found)</summary>
+    public event Action<List<Core.BallPitRoster.Member>, bool, int, bool>? MembersReceived;
+    readonly Dictionary<string, TaskCompletionSource<string?>> _avWait = new();
+    /// <summary>Ask the observer to read the Room members list (full = scroll the virtualized list top→bottom, then restore).</summary>
+    public async Task ScanMembers(bool full)
+    {
+        if (!IsLoaded2) return;
+        try { await _b!.EvalAsync(View, $"window.__epikMembers ? (window.__epikMembers({(full ? "true" : "false")}), 'started') : 'no-helper'"); } catch { }
+    }
+    /// <summary>Avatar fallback: the page re-fetches an image it already shows and returns it as a data: URL (no other API calls).</summary>
+    public async Task<byte[]?> FetchAvatarViaPage(string url)
+    {
+        if (!IsLoaded2) return null;
+        var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_avWait) { if (_avWait.Count > 50) return null; _avWait[url] = tcs; }
+        try { await _b!.EvalAsync(View, "window.__epikFetchAvatar ? (window.__epikFetchAvatar(" + JsonSerializer.Serialize(url) + "), 'started') : 'no-helper'"); } catch { lock (_avWait) _avWait.Remove(url); return null; }
+        var done = await Task.WhenAny(tcs.Task, Task.Delay(10000));
+        lock (_avWait) _avWait.Remove(url);
+        if (done != tcs.Task || tcs.Task.Result is not { } d) return null;
+        var i = d.IndexOf(";base64,", StringComparison.Ordinal);
+        try { return i > 0 ? Convert.FromBase64String(d[(i + 8)..]) : null; } catch { return null; }
     }
 }

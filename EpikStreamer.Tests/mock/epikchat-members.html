@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<!-- v2.5 Ball Pit mock: a react-virtuoso-style virtualized "Room members" list (only ~12 of 150 rows rendered at a time),
+     avatars (<img>), coloured names, a "Members 150" heading. Names/avatars are fake. -->
+<style>body{font:14px sans-serif;background:#111;color:#ddd} #sc{height:400px;width:260px;overflow-y:auto;border:1px solid #444}
+ .row{height:40px;display:flex;align-items:center;gap:6px;position:absolute;left:0;right:0} button{color:inherit;background:none;border:0;font:inherit} img{width:28px;height:28px;border-radius:50%}</style>
+<script src="chat-observer.js"></script>
+</head><body>
+<aside>
+  <h3 id="hdr">Members 150</h3>
+  <div id="sc" data-virtuoso-scroller="true">
+    <div id="inner" style="position:relative">
+      <div role="list" aria-label="Room members" id="list"></div>
+    </div>
+  </div>
+</aside>
+<img id="probe" style="display:none">
+<script>
+(() => {
+  const cols = ['rgb(248, 113, 113)', 'rgb(96, 165, 250)', 'rgb(52, 211, 153)', ''];
+  let people = Array.from({ length: 150 }, (_, i) => ({ name: 'member' + String(i).padStart(3, '0'), avatar: i % 5 === 4 ? '' : 'https://cdn.example.test/avatars/' + i + '.png', color: cols[i % 4] }));
+  const sc = document.getElementById('sc'), inner = document.getElementById('inner'), list = document.getElementById('list');
+  const H = 40;
+  const render = () => {
+    inner.style.height = people.length * H + 'px';
+    const first = Math.max(0, Math.floor(sc.scrollTop / H) - 1), last = Math.min(people.length, Math.ceil((sc.scrollTop + 400) / H) + 1);
+    list.innerHTML = '';
+    for (let i = first; i < last; i++) {
+      const p = people[i]; const r = document.createElement('div');
+      r.className = 'row'; r.setAttribute('data-index', i); r.setAttribute('role', 'listitem'); r.style.top = i * H + 'px';
+      r.innerHTML = (p.avatar ? `<img alt="" src="${p.avatar}">` : '') + `<button type="button"><span style="${p.color ? 'color:' + p.color : ''}">${p.name}</span></button>`;
+      list.appendChild(r);
+    }
+  };
+  sc.addEventListener('scroll', () => setTimeout(render, 30));   // virtuoso re-renders asynchronously
+  let lastTop = -1; setInterval(() => { if (sc.scrollTop !== lastTop) { lastTop = sc.scrollTop; render(); } }, 40);   // headless Chrome may not fire scroll events without frames
+  render();
+  // a small real PNG for the avatar-fetch fallback (drawn on a canvas)
+  const c = document.createElement('canvas'); c.width = c.height = 16; const g = c.getContext('2d'); g.fillStyle = '#f0f'; g.fillRect(0, 0, 16, 16);
+  const pngUrl = c.toDataURL('image/png'); document.getElementById('probe').src = pngUrl; window.__pngUrl = pngUrl;
+  window.__res = { scans: [], avatars: [], renderedMax: 0 };
+  const tapPrev = window.__epikTap;
+  window.__epikTap = m => {
+    if (m.type === 'epik-members') window.__res.scans.push({ n: m.members.length, total: m.total, complete: m.complete, virtualized: m.virtualized, found: m.found,
+      names: m.members.map(x => x.name), withAvatar: m.members.filter(x => x.avatar).length, withColor: m.members.filter(x => x.color).length,
+      sample: m.members.filter(x => x.name === 'member001' || x.name === 'member004')});
+    if (m.type === 'epik-avatar') window.__res.avatars.push({ ok: (m.data || '').startsWith('data:image/png'), err: m.error });
+    if (tapPrev) tapPrev(m);
+  };
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  (async () => {
+    for (let i = 0; i < 100 && !window.__epikMembers; i++) await wait(100);
+    window.__res.renderedMax = list.children.length;
+    sc.scrollTop = 200; await wait(100); const keep = sc.scrollTop;
+    await window.__epikMembers(false);                        // quick: only rendered rows
+    await window.__epikMembers(true);                         // full: scrolls through the virtualized list
+    window.__res.restored = sc.scrollTop === keep;
+    people = people.filter(p => p.name !== 'member007'); people.push({ name: 'newbie', avatar: 'https://cdn.example.test/avatars/new.png', color: 'rgb(253, 224, 71)' });
+    document.getElementById('hdr').textContent = 'Members 150'; render();
+    await window.__epikMembers(true);
+    list.firstElementChild.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 40 }));   // the user is scrolling the list: don't fight them
+    await window.__epikMembers(true);
+    await window.__epikFetchAvatar(pngUrl); await wait(300);
+    window.__res.diag = JSON.parse(window.__epikDiag()).viewers.ballPit;
+    window.__res.done = true;
+    document.title = JSON.stringify(window.__res);
+  })();
+})();
+</script>
+</body></html>

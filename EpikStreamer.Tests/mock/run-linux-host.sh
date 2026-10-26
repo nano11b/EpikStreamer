@@ -48,3 +48,17 @@ check(X['statuses']==d['statuses'],'observer status lines reach C#')
 check([list(v) for v in X['viewers']]==[list(v) for v in d['viewers']],'viewer snapshots reach C#')
 print('CHAT MOCK PASSED' if fails==0 else f'{fails} FAILED'); sys.exit(1 if fails else 0)
 PY
+# v2.5 Ball Pit: member collector + avatar fallback through the WebKitGTK bridge
+"$B" --selftest-members . "$out/mem.json"
+python3 members-check.py "$out/mem.json.page.json"
+python3 - "$out/mem.json" <<'PY'
+import sys,json
+X=json.load(open(sys.argv[1])); S=X['scans']; fails=0
+def check(ok,what):
+    global fails; print(('PASS ' if ok else 'FAIL ')+what); fails+= not ok
+check([s['n'] for s in S]==[12,150,150,11] or (len(S)==4 and S[1]['n']==150 and S[2]['n']==150),'member scans reach C# (150 after full scans)')
+check(S[1]['complete'] and S[1]['total']==150 and S[1]['avatars']==120 and S[1]['colors']==113,'complete flag, total, avatar URLs and colours survive the bridge')
+check(S[1]['m1']=={'Name':'member001','Avatar':'https://cdn.example.test/avatars/1.png','Color':'rgb(96, 165, 250)'},'member record parsed')
+check(X['avatarIsPng'] and X['avatarBytes']>50,'FetchAvatarViaPage returns PNG bytes')
+print('MEMBERS BRIDGE PASSED' if fails==0 else f'{fails} FAILED'); sys.exit(1 if fails else 0)
+PY

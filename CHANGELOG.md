@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.5.0 — 2026-10-26
+### Added
+- **Ball Pit** (new tab): everyone in the room becomes a bouncy, avatar-textured 3D ball you can stream.
+  - **Who's in it:** the room's **Room members** list. The list is virtualized, so a full scan scrolls through it and then puts your scroll position back; it never scrolls while you're using the list. Optionally, **LIVE viewers** and recent **chat authors** are included too. Each member's avatar and name color is used; people without an avatar get an initials ball.
+  - **Avatars** are downloaded directly and cached on disk. If that's blocked, the chat page re-reads an image it already shows. No other site APIs are called.
+  - **Scene:** rendered on the CPU with SkiaSharp. A lit room (floor and walls) with shaded, textured balls that roll, soft shadows and name labels. Camera tilt, zoom, angle and an optional slow orbit are adjustable. Up to 200 balls by default (hard cap 300); extra people wait for a free slot.
+  - **Physics:** gravity, bounce (restitution), ball-to-ball collisions, rolling friction and walls.
+  - **Events:** a joiner drops in from above, a leaver pops. A chat message makes that person's ball jump and shows a speech bubble.
+  - **Chat commands** `!bounce`, `!bigball`, `!color <#hex>` and `!shake` go through the existing chat-command system, with a per-user cooldown equal to the command cooldown. `!shake` can be host-only or have its own cooldown. The Ball Pit never replies in chat.
+  - **Two modes:** **Source** replaces the video with the pit (with no video in the playlist, a silent background runs and your Audio-tab music still plays). **Overlay** draws the pit with transparency on top of the playlist.
+  - Both modes work with recording, multi-output (tee), the hardware encoders, auto Go live and auto-reconnect.
+  - **Tab controls:** a live preview (the actual stream frames while you're live), the member count, settings, **Add 10 test users**, **Scan members now** and a manual **!shake** button.
+  - **Performance:** about 144 fps rendered at 1280×720 with 200 balls on 8 cores (Release build), so 720p30 uses roughly 20 % of one core. A render scale (100/75/50 %) is available for slower machines.
+- Chat diagnostics gain a `ballPit` section listing the member, avatar, name and total selectors, all flagged `verified: false`. It contains no names.
+### Tests
+- Physics and feature unit tests (`ballpit`): rebound, collisions, the cap and waiting list, commands and cooldowns, command routing, roster merging, textures, avatar cache and ffmpeg arguments. There's also a render benchmark (`ballpit-bench`).
+- End-to-end 10 s encodes in both modes on the system ffmpeg and on the FFmpeg master build (`ballpit-encode`).
+- New mock `epikchat-members.html`: a 150-member virtualized list with avatars and colors, plus a join and a leave, user-scroll protection and the avatar fallback. It runs in headless Chrome (`run-members-mock.sh`) and through the Linux WebKitGTK bridge (`--selftest-members`).
+### Unverified assumptions
+- The member avatar, name-color and member-total selectors are **untested against the real signed-in site**. If they're wrong, balls get initials and default colors; the names still come from the already-used "Room members" list.
+- Emoji in names and bubbles have no color-emoji font fallback in the renderer and may show as boxes.
+
 ## 2.4.1 — 2026-10-26
 ### Fixed
 - **Start now opens the EpikChat live session for you.** Before, you had to click the camera (Go live) icon in EpikChat before Start would work, because EpikChat refuses the RTMP ingest until a live session exists.

@@ -4,14 +4,14 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <Nullable>enable</Nullable>
+    <Nullable>enable</Nullable><AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>EpikStreamer</AssemblyName>
     <RootNamespace>EpikStreamer</RootNamespace>
-    <Version>2.4.1</Version>
-    <AssemblyVersion>2.4.1.0</AssemblyVersion>
-    <FileVersion>2.4.1.0</FileVersion>
+    <Version>2.5.0</Version>
+    <AssemblyVersion>2.5.0.0</AssemblyVersion>
+    <FileVersion>2.5.0.0</FileVersion>
     <Product>EpikStreamer</Product>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- WebView2Loader.dll is native: extract it from the single-file bundle at runtime -->
@@ -23,7 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
-    <PackageReference Include="NetMQ" Version="4.0.4.5" />
+    <PackageReference Include="NetMQ" Version="4.0.4.5" /><PackageReference Include="SkiaSharp" Version="2.88.9" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup><Resource Include="app.ico" /><EmbeddedResource Include="Web\chat-observer.js" LogicalName="EpikStreamer.Web.chat-observer.js" /></ItemGroup>

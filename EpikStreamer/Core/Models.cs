@@ -93,6 +93,7 @@ public class Profile
     public OverlaySettings Overlays { get; set; } = new();
     public AudioSettings Audio { get; set; } = new();   // v2.2
     public NowPlayingSettings NowPlaying { get; set; } = new();   // v2.3
+    public BallPitSettings BallPit { get; set; } = new();         // v2.5
 
     public Profile Clone(string newName)
     {

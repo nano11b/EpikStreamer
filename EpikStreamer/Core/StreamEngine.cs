@@ -27,7 +27,7 @@ public sealed class StreamEngine
     public event Action<int, DestState, string>? DestinationStatus;   // index into Destinations
     public event Action? Finished;
 
-    readonly Profile _p; readonly string _ffmpeg; readonly string? _ffprobe;
+    Profile _p; readonly string _ffmpeg; readonly string? _ffprobe;
     readonly List<CommandBuilder.Destination> _netDests; readonly List<string> _secrets;
     public IReadOnlyList<CommandBuilder.Destination> Destinations => _netDests;
     public List<string> Recordings { get; } = new();
@@ -122,9 +122,47 @@ public sealed class StreamEngine
     public StreamEngine(Profile profile, string ffmpeg, string outputUrl, string? secretForLogMasking, string? workDir = null)
         : this(profile, ffmpeg, new[] { new CommandBuilder.Destination("Output", outputUrl) }, secretForLogMasking == null ? Array.Empty<string>() : new[] { secretForLogMasking }, workDir) { }
 
+    // ---- v2.5 Ball Pit ----
+    /// <summary>The scene to stream (host-owned; also used for the in-app preview). Ignored when the profile's Ball Pit mode is Off.</summary>
+    public BallPitScene? BallPit { get; set; }
+    public BallPitFeed? PitFeed { get; private set; }
+    int _pitGen;
+    public bool PitActive => BallPit != null && _p.BallPit.Active;
+    public const string FillerName = "Ball Pit.mkv";
+
+    /// <summary>Source mode with an empty playlist: a silent, black 10-minute filler (looped) provides the audio timeline.</summary>
+    string MakeFiller()
+    {
+        var f = Path.Combine(WorkDir, $"Ball Pit filler {_p.Fps}.mkv");
+        if (File.Exists(f) && new FileInfo(f).Length > 1000) return f;
+        var psi = new ProcessStartInfo(_ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
+        foreach (var x in new[] { "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", $"color=c=0x101018:s=640x360:r={_p.Fps}:d=60,noise=alls=20:allf=t",
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "60", "-c:v", "libx264", "-preset", "ultrafast", "-b:v", "2000k", "-maxrate", "2000k", "-bufsize", "2000k", "-pix_fmt", "yuv420p", "-g", "60", "-c:a", "aac", "-b:a", "32k", "-ar", "48000", f + ".tmp.mkv" })
+            psi.ArgumentList.Add(x);
+        using var pr = Process.Start(psi)!; var err = pr.StandardError.ReadToEnd(); pr.WaitForExit(60000);
+        if (pr.ExitCode != 0) throw new InvalidOperationException("Could not create the Ball Pit filler: " + err.Trim());
+        File.Move(f + ".tmp.mkv", f, true);
+        return f;
+    }
+
+    void StartPitFeed(int port, int w, int h, bool transparent)
+    {
+        int gen = Interlocked.Increment(ref _pitGen);
+        var feed = new BallPitFeed(BallPit!, w, h, _p.Fps, transparent); feed.Log += Emit; PitFeed = feed;
+        new Thread(() => feed.Run(port, () => gen == _pitGen && !_stop)) { IsBackground = true, Name = "ball pit feed", Priority = ThreadPriority.AboveNormal }.Start();
+    }
+
     public void Start()
     {
         if (IsRunning) return;
+        if (PitActive && _p.BallPit.Mode == "Source" && !_p.Playlist.Any(i => File.Exists(i) && Probe(i).HasVideo))   // empty, or only audio files
+        {
+            var filler = MakeFiller();
+            var json = System.Text.Json.JsonSerializer.Serialize(_p, ProfileStore.Json);
+            _p = System.Text.Json.JsonSerializer.Deserialize<Profile>(json, ProfileStore.Json)!;
+            _p.Playlist = new() { filler }; _p.LoopPlaylist = true; _p.Shuffle = false; _p.CrossfadeSeconds = 0;
+            Emit("● Ball Pit source: no video in the playlist, using a silent background (add music on the Audio tab).");
+        }
         if (_p.Playlist.Count == 0) throw new InvalidOperationException("Playlist is empty.");
         if (_netDests.Count == 0 && !_p.RecordEnabled) throw new InvalidOperationException("No enabled output and recording is off.");
         PrepareOverlayFiles();
@@ -152,7 +190,7 @@ public sealed class StreamEngine
         { Emit("Next item is already starting."); return; }
         _skip = true; KillFeeder();
     }
-    public void Stop() { _stop = true; _cts?.Cancel(); KillFeeder(); Interlocked.Increment(ref _musicGen); }
+    public void Stop() { _stop = true; _cts?.Cancel(); KillFeeder(); Interlocked.Increment(ref _musicGen); Interlocked.Increment(ref _pitGen); }
 
     // ---- runtime control (v2.2) ----
     bool MusicActive => _p.Audio.MusicEnabled && _p.Audio.MusicPlaylist.Any(File.Exists);
@@ -364,7 +402,7 @@ public sealed class StreamEngine
         catch (Exception ex) { Emit("Engine error: " + ex); State?.Invoke("Error: " + ex.Message); }
         finally
         {
-            KillFeeder(); Interlocked.Increment(ref _musicGen); try { if (_enc is { HasExited: false }) _enc.Kill(true); } catch { }
+            KillFeeder(); Interlocked.Increment(ref _musicGen); Interlocked.Increment(ref _pitGen); try { if (_enc is { HasExited: false }) _enc.Kill(true); } catch { }
             _ctl?.Dispose(); _ctl = null; _alertTimer?.Dispose(); _chatTimer?.Dispose(); _np?.Dispose();
             for (int i = 0; i < _netDests.Count; i++) DestinationStatus?.Invoke(i, DestState.Stopped, "");
             RemuxRecordings();
@@ -409,8 +447,12 @@ public sealed class StreamEngine
         }
         int ctlPort = RuntimeControl && caps.HasFilter("azmq") ? StreamControl.FreePort() : 0;
         int musicPort = MusicActive ? StreamControl.FreePort() : 0;
+        int pitPort = PitActive ? StreamControl.FreePort() : 0;
+        double rs = Math.Clamp(_p.BallPit.RenderScale, 0.25, 1);
+        int pw = Math.Max(16, (int)(_p.Width * rs) & ~1), ph = Math.Max(16, (int)(_p.Height * rs) & ~1);
         var lo = new CommandBuilder.LiveOptions(ctlPort, musicPort, MicActive ? a.MicDevice : null, TextOverlays,
-            MusicMuted ? 0 : a.MusicVolume, MicMuted ? 0 : a.MicVolume, a.MainVolume, _np != null);
+            MusicMuted ? 0 : a.MusicVolume, MicMuted ? 0 : a.MicVolume, a.MainVolume, _np != null,
+            pitPort, PitActive ? _p.BallPit.Mode : "", pw, ph);
         _ctl?.Dispose(); _ctl = ctlPort > 0 ? new StreamControl(ctlPort) : null;
         var args = CommandBuilder.EncoderArgs(_p, dests, hasLogo, lo, caps);
         Emit("> ffmpeg " + CommandBuilder.Display(args, _secrets));
@@ -462,6 +504,7 @@ public sealed class StreamEngine
         p.Exited += (_, _) => { _cts?.Cancel(); KillFeeder(); }; // unblocks the pump so we can reconnect
         p.Start(); p.BeginOutputReadLine(); p.BeginErrorReadLine();
         if (musicPort > 0) StartMusic(musicPort);
+        if (pitPort > 0) StartPitFeed(pitPort, pw, ph, _p.BallPit.Mode == "Overlay");
         lock (_lk) _enc = p;
         _lastProgress = DateTime.UtcNow; _outTime = 0; _encTl0 = _tl;
 

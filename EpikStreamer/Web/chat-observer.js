@@ -22,6 +22,10 @@
     // (any list labelled/titled "Viewers"). Override via CFG.sel.viewers; diagnostics report what matched.
     viewers: '[role="list"][aria-label="Viewers" i], [role="list"][aria-label*="viewers" i], [aria-label="Viewers" i] [role="list"], [data-live-viewers] [role="list"]',
     memberRow: '[data-index], [role="listitem"]',
+    // v2.5 Ball Pit. ⚠ NOT VERIFIED: avatar = first <img> in a member row; name colour = computed colour of the name element.
+    memberAvatar: 'img[src]',
+    memberName: 'button, [data-username], span',
+    membersTotal: '[aria-label="Room members"][aria-setsize], [data-members-count]',
   }, CFG.sel || {});
   const post = m => { try { window.chrome.webview.postMessage(m); } catch { } if (window.__epikTap) window.__epikTap(m); };
   const status = text => post({ type: 'epik-chat-status', text });
@@ -189,7 +193,7 @@
   const namesIn = list => list ? [...new Set([...list.querySelectorAll(S.memberRow)].filter(r => !r.parentElement.closest(S.memberRow)).map(rowName).filter(Boolean))] : null;
   const vst = { last: {}, at: 0 };
   const scanViewers = () => {
-    for (const [source, list] of [['LiveViewers', viewersList()], ['RoomMembers', [...document.querySelectorAll(S.members)].find(shown) || null]]) {
+    for (const [source, list] of [['LiveViewers', viewersList()], ['RoomMembers', memberList()]]) {
       const names = namesIn(list); if (!names) continue;
       const key = names.slice().sort().join('\n');
       if (vst.last[source] === key && Date.now() - vst.at < 30000) continue;
@@ -201,7 +205,7 @@
     const v = viewersList(), m = document.querySelector(S.members);
     return { verified: false, viewersSelectorHits: (() => { try { return document.querySelectorAll(S.viewers).length; } catch { return 'bad selector'; } })(),
       viewersFound: !!v, viewersCount: v ? (namesIn(v) || []).length : 0, viewersSkeleton: skel(v, 5, { n: 40 }),
-      membersFound: !!m, membersCount: m ? (namesIn(m) || []).length : 0 };
+      membersFound: !!m, membersCount: m ? (namesIn(m) || []).length : 0, ballPit: ballPitDiag() };
   };
   // Quick action: open a user's profile the normal way (click their name in the member list or chat). No moderation.
   window.__epikOpenProfile = name => {
@@ -212,6 +216,86 @@
       if (t === want || al === 'open ' + want || al === want + "'s profile") { b.scrollIntoView({ block: 'center' }); b.click(); return 'opened'; }
     }
     return 'not found (scroll the member list so the name is visible)';
+  };
+
+  // ---- v2.5 Ball Pit: full member roster (read-only; scrolls the virtualized list, then puts it back) ----
+  // absolutely-positioned virtual rows can leave the list element itself 0px tall, so also accept a visible-tree list with rows
+  const memberList = () => { const all = [...document.querySelectorAll(S.members)]; return all.find(shown) || all.find(e => e.isConnected && !e.closest('[aria-hidden="true"]') && e.querySelector(S.memberRow)) || null; };
+  const mst = { userAt: 0, busy: false, ours: 0 };
+  const scroller = list => { for (let e = list; e && e !== document.body; e = e.parentElement) { const cs = getComputedStyle(e); if (/(auto|scroll)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 4) return e; } return null; };
+  const avatarOf = r => { const i = r.querySelector(S.memberAvatar); const u = i && (i.currentSrc || i.getAttribute('src') || ''); return u && !/^data:image\/svg/.test(u) ? new URL(u, location.href).href : ''; };
+  const colorOf = r => {
+    const b = r.querySelector('button'); const cands = b ? [b, ...b.querySelectorAll('*')] : [...r.querySelectorAll(S.memberName)];
+    const name = rowName(r);
+    const base = getComputedStyle(r.closest(S.members) || r).color;   // inherited default text colour = no name colour
+    for (const e of cands.reverse()) { if ((e.textContent || '').trim() !== name) continue; const c = getComputedStyle(e).color; if (c && c !== base) return c; }   // deepest first
+    return '';
+  };
+  const memberRows = list => [...list.querySelectorAll(S.memberRow)].filter(r => !r.parentElement.closest(S.memberRow));
+  const totalOf = list => {
+    const a = list.getAttribute('aria-setsize') || (list.querySelector('[aria-setsize]') || { getAttribute: () => '' }).getAttribute('aria-setsize');
+    if (+a > 0) return +a;
+    for (let p = list.parentElement, i = 0; p && i < 4; p = p.parentElement, i++) {   // a "Members 123" / "123 online" heading nearby
+      const h = [...p.querySelectorAll('h1,h2,h3,h4,[role="heading"],span,div')].find(e => e.children.length <= 2 && !list.contains(e) && /^\s*(members|online|people)?\s*[(·:]?\s*\d{1,5}\s*\)?\s*(members|online|people)?\s*$/i.test(e.textContent || '') && /\D/.test((e.textContent || '').trim()));
+      if (h) return +((h.textContent || '').match(/\d+/) || [0])[0];
+    }
+    return 0;
+  };
+  window.__epikMembers = async (full) => {
+    const list = memberList();
+    if (!list) { post({ type: 'epik-members', members: [], total: 0, complete: false, virtualized: false, found: false }); return 'no list'; }
+    if (mst.busy) return 'busy';
+    const out = new Map();
+    const take = () => { for (const r of memberRows(list)) { const name = rowName(r); if (!name) continue; const k = name.toLowerCase(); const o = out.get(k) || { name, avatar: '', color: '' }; o.avatar = o.avatar || avatarOf(r); o.color = o.color || colorOf(r); out.set(k, o); } };
+    const sc = scroller(list);
+    const virtualized = !!list.querySelector('[data-index]') || !!list.closest('[data-virtuoso-scroller]');
+    let complete = !sc;
+    take();
+    if (sc && full && Date.now() - mst.userAt > 5000) {   // don't fight the user's own scrolling
+      mst.busy = true; const keep = sc.scrollTop;
+      try {
+        mst.ours = Date.now(); sc.scrollTop = 0; await new Promise(r => setTimeout(r, 150)); take();
+        for (let i = 0; i < 400; i++) {
+          if (Date.now() - mst.userAt < 1000 && mst.userAt > mst.ours + 50) break;   // user grabbed the list: stop
+          const before = sc.scrollTop; mst.ours = Date.now(); sc.scrollTop = before + Math.max(40, sc.clientHeight * 0.8);
+          await new Promise(r => setTimeout(r, 120)); take();
+          if (sc.scrollTop <= before + 1) { complete = true; break; }
+        }
+      } finally { mst.ours = Date.now(); sc.scrollTop = keep; mst.busy = false; }
+    }
+    const members = [...out.values()].slice(0, 2000);
+    const total = totalOf(list);
+    if (total > 0 && members.length < total) complete = false;
+    post({ type: 'epik-members', members, total, complete, virtualized, found: true });
+    return members.length + (complete ? ' (complete)' : ' (partial)');
+  };
+  document.addEventListener('wheel', e => { if (e.target.closest && e.target.closest(S.members)) mst.userAt = Date.now(); }, { passive: true, capture: true });
+  document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest(S.members)) mst.userAt = Date.now(); }, { passive: true, capture: true });
+  document.addEventListener('touchmove', e => { if (e.target.closest && e.target.closest(S.members)) mst.userAt = Date.now(); }, { passive: true, capture: true });
+  // Avatar fallback: re-fetch an image the page already shows (same request the page makes) and hand it over as a data: URL.
+  window.__epikFetchAvatar = async (url) => {
+    const done = (data, err) => post({ type: 'epik-avatar', url, data: data || '', error: err || '' });
+    try {
+      const r = await fetch(url, { credentials: 'include', cache: 'force-cache' });
+      if (!r.ok) return done('', 'http ' + r.status);
+      const b = await r.blob(); if (b.size > 2000000) return done('', 'too big');
+      const fr = new FileReader(); fr.onload = () => done(String(fr.result)); fr.onerror = () => done('', 'read'); fr.readAsDataURL(b);
+    } catch (e) {   // CORS: draw the already-loaded <img> instead (works when the image is same-origin / CORS-enabled)
+      try {
+        const img = [...document.images].find(i => i.currentSrc === url || i.src === url);
+        if (!img || !img.complete) return done('', 'not loaded');
+        const c = document.createElement('canvas'); c.width = Math.min(128, img.naturalWidth || 64); c.height = Math.min(128, img.naturalHeight || 64);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); done(c.toDataURL('image/png'));
+      } catch (e2) { done('', 'blocked'); }
+    }
+    return 'started';
+  };
+  const ballPitDiag = () => {
+    const m = memberList(); const rows = m ? memberRows(m) : [];
+    return { verified: false, note: 'Ball Pit member avatar/colour/total selectors are guesses until checked on the live site',
+      selectors: { members: S.members, memberRow: S.memberRow, memberAvatar: S.memberAvatar, memberName: S.memberName, membersTotal: S.membersTotal },
+      listFound: !!m, rowsRendered: rows.length, rowsWithAvatar: rows.filter(r => !!avatarOf(r)).length, rowsWithColor: rows.filter(r => !!colorOf(r)).length,
+      scrollable: !!(m && scroller(m)), virtualized: !!(m && (m.querySelector('[data-index]') || m.closest('[data-virtuoso-scroller]'))), totalShown: m ? totalOf(m) : 0 };
   };
 
   window.__epikObs = st;
