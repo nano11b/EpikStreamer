@@ -18,6 +18,8 @@ public class SessionRecord
     public int Reconnects { get; set; }
     public List<string> FilesPlayed { get; set; } = new();
     public string EndReason { get; set; } = "";
+    public int UniqueViewers { get; set; }                       // v2.3 (named viewers seen in the chat lists)
+    public List<string> TopViewers { get; set; } = new();        // v2.3 "name (minutes)", longest first, max 20
 }
 
 /// <summary>Accumulates one session's stats (thread-safe).</summary>
@@ -37,6 +39,11 @@ public sealed class SessionTracker
         }
     }
     public void OnViewers(int v) { lock (_lk) { _vSum += v; _vN++; _r.PeakViewers = Math.Max(_r.PeakViewers, v); } }
+    public void SetViewers(IEnumerable<ViewerSession> v, DateTime now)
+    {
+        var l = v.ToList();
+        lock (_lk) { _r.UniqueViewers = l.Count; _r.TopViewers = l.OrderByDescending(x => x.TotalNow(now)).Take(20).Select(x => $"{x.Name} ({x.TotalNow(now).TotalMinutes:0} min)").ToList(); }
+    }
     public SessionRecord Finish(DateTime end, string reason)
     {
         lock (_lk)
@@ -72,14 +79,14 @@ public sealed class HistoryStore
 
     public static string ToCsv(IEnumerable<SessionRecord> rs)
     {
-        var sb = new StringBuilder("start,end,duration_s,profile,destinations,peak_viewers,avg_viewers,avg_bitrate_kbps,dropped_frames,reconnects,files_played,end_reason\r\n");
+        var sb = new StringBuilder("start,end,duration_s,profile,destinations,peak_viewers,avg_viewers,avg_bitrate_kbps,dropped_frames,reconnects,files_played,end_reason,unique_viewers\r\n");
         var ci = CultureInfo.InvariantCulture;
         foreach (var r in rs)
             sb.Append(string.Join(",", new[]
             {
                 r.Start.ToString("yyyy-MM-dd HH:mm:ss", ci), r.End.ToString("yyyy-MM-dd HH:mm:ss", ci), r.DurationSec.ToString(ci), Q(r.Profile),
                 Q(string.Join("; ", r.Destinations)), r.PeakViewers.ToString(ci), r.AvgViewers.ToString(ci), r.AvgBitrateKbps.ToString(ci),
-                r.DroppedFrames.ToString(ci), r.Reconnects.ToString(ci), Q(string.Join("; ", r.FilesPlayed)), Q(r.EndReason),
+                r.DroppedFrames.ToString(ci), r.Reconnects.ToString(ci), Q(string.Join("; ", r.FilesPlayed)), Q(r.EndReason), r.UniqueViewers.ToString(ci),
             })).Append("\r\n");
         return sb.ToString();
     }

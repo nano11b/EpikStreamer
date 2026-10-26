@@ -176,6 +176,119 @@ if (mode == "v22")
     Console.WriteLine(fails == 0 ? "ALL V2.2 UNIT TESTS PASSED" : $"{fails} FAILED");
     return fails;
 }
+if (mode == "cardargs") { var cp0 = MakeProfile(); cp0.NowPlaying.Enabled = true; Console.WriteLine(string.Join("\n", NowPlayingCard.RenderArgs(cp0, new("T", "amy", "N", 30, 120, "/tmp/x.jpg"), "o.png", true))); return 0; }
+if (mode == "v23")
+{
+    // --- fuzzy matching ---
+    var lib = new List<LibraryItem>
+    {
+        new() { Path = "/m/Daft Punk - Harder Better Faster Stronger.mp4", Title = "Harder Better Faster Stronger", Artist = "Daft Punk", Duration = 224 },
+        new() { Path = "/m/rick_astley_never_gonna_give_you_up (Official Video).mp4", Title = LibraryItem.TitleFromFile("/m/rick_astley_never_gonna_give_you_up (Official Video).mp4"), Duration = 213 },
+        new() { Path = "/m/Beyoncé - Halo.mkv", Title = "Halo", Artist = "Beyoncé", Duration = 261 },
+        new() { Path = "/m/long_mix.mkv", Title = "Two Hour Mix", Duration = 7200 },
+        new() { Path = "/m/intro.mp4", Title = "intro", Duration = 30 },
+    };
+    Check(lib[1].Title == "rick astley never gonna give you up", "title from file name (tags like (Official Video) stripped): " + lib[1].Title);
+    Check(Fuzzy.Rank("never gonna give", lib)[0].Item == lib[1], "fuzzy: substring");
+    Check(Fuzzy.Rank("harder beter faster", lib)[0].Item == lib[0], "fuzzy: typo");
+    Check(Fuzzy.Rank("beyonce halo", lib)[0].Item == lib[2], "fuzzy: accents + artist");
+    Check(Fuzzy.Rank("daft", lib)[0].Item == lib[0], "fuzzy: prefix/artist");
+    Check(Fuzzy.Rank("zzzz qqqq", lib).Count == 0 || Fuzzy.Rank("zzzz qqqq", lib)[0].Score < 0.55, "fuzzy: nonsense doesn't match");
+    // --- requests ---
+    var rs = new RequestSettings { PerUserLimit = 2, UserCooldownSeconds = 30, MaxQueue = 3, BlockedUsers = "troll, @spam", SkipVotes = 2 };
+    var srq = new SongRequestQueue(rs); var t = new DateTime(2026, 10, 25, 20, 0, 0);
+    string R(string u, string text, double sec = 0, string cur = "/m/intro.mp4", int viewers = 10) => srq.Handle(new(u, text), lib, cur, "track1", viewers, t.AddSeconds(sec))?.Reply ?? "(null)";
+    Check(R("amy", "!sr never gonna").Contains("added") && srq.Count == 1, "!sr adds: " + R("x", "!queue"));
+    Check(R("amy", "!request halo", 5).Contains("wait"), "per-user cooldown");
+    Check(R("amy", "!request halo", 31).Contains("added") && R("amy", "!request daft", 62).Contains("already have 2"), "per-user limit");
+    Check(R("bob", "!request never gonna give you up").Contains("already in the queue"), "duplicate rejected");
+    Check(R("bob", "!request intro").Contains("playing right now"), "currently playing rejected");
+    Check(R("troll", "!request halo").Contains("aren't available") && R("Spam", "!sr halo").Contains("aren't available"), "blocked users");
+    Check(R("bob", "!sr xqzv blorp").Contains("no match"), "no match message");
+    Check(R("bob", "!sr daft punk").Contains("added") && R("cat", "!sr two hour").Contains("queue is full"), "max queue");
+    Check(R("x", "!queue").StartsWith("Queue: 1. rick astley"), "!queue lists");
+    rs.AllowedUsers = "vip1"; Check(R("bob2", "!sr halo", 100).Contains("limited"), "allow-list"); rs.AllowedUsers = "";
+    rs.MaxDurationMinutes = 60; srq.Clear(); Check(R("dan", "!sr two hour mix", 200).Contains("longer than"), "max duration"); rs.MaxDurationMinutes = 0;
+    // engine side: placement + approval
+    srq.Clear(); R("eve", "!sr halo", 300);
+    Check(srq.TakeNext(false)?.Path == "/m/Beyoncé - Halo.mkv", "Placement=Next: taken at any boundary");
+    rs.Placement = "End"; R("eve2", "!sr halo", 400);
+    Check(srq.TakeNext(false) == null && srq.TakeNext(true) != null, "Placement=End: only at the end of a pass"); rs.Placement = "Next";
+    rs.RequireApproval = true; Check(R("fay", "!sr daft", 500).Contains("approval") && srq.TakeNext(false) == null, "approval required: pending not played");
+    var pend = srq.Snapshot()[0]; Check(srq.Approve(pend.Id) && srq.TakeNext(false)?.Id == pend.Id, "approved → played"); rs.RequireApproval = false;
+    R("g1", "!sr halo", 600); R("g2", "!sr daft", 600); var snap = srq.Snapshot();
+    Check(srq.Move(snap[1].Id, -1) && srq.Snapshot()[0].User == "g2" && srq.Remove(snap[0].Id) && srq.Count == 1, "host reorder/deny");
+    // vote skip + wrongsong
+    Check(srq.VoteSkip("a", "k1", 10).Skip == false && srq.VoteSkip("a", "k1", 10).Reply!.Contains("already voted") && srq.VoteSkip("b", "k1", 10).Skip, "vote skip: N votes, one per user");
+    Check(srq.VoteSkip("a", "k2", 10).Skip == false, "votes reset on a new track");
+    rs.SkipPercent = 30; Check(srq.SkipThreshold(10) == 3 && srq.SkipThreshold(1) == 1 && srq.SkipThreshold(0) == 2, "vote skip: % of viewers"); rs.SkipPercent = 0;
+    Check(R("g2", "!wrongsong", 700).Contains("removed") && srq.Count == 0 && R("g2", "!wrongsong", 700).Contains("no queued"), "!wrongsong removes own request");
+    var sr = srq.Add(lib[2], "host"); srq.TakeNext(false); srq.Scheduled(sr); srq.OnAir(sr.Path);
+    Check(srq.Playing?.User == "host" && srq.WrongSong("host").Skip, "!wrongsong while on air skips it");
+    Check(srq.Handle(new("bot", "!sr halo", null, IsBot: true), lib, "", "k", 1, t) == null && srq.Handle(new("me", "!sr halo", null, false, true), lib, "", "k", 1, t) == null, "bots/self can't request");
+    rs.Enabled = false; Check(srq.Handle(new("a", "!sr halo"), lib, "", "k", 1, t) == null, "requests disabled"); rs.Enabled = true;
+    // --- viewer tracker ---
+    var vt = new ViewerTracker(new ViewerSettings { LeaveGraceSeconds = 20 }) { Self = "Me" }; var ev = new List<string>();
+    vt.Joined += v => ev.Add("+" + v.Name); vt.Left += v => ev.Add("-" + v.Name);
+    vt.Update("LiveViewers", new[] { "amy", "Bob", "Me" }, t);
+    vt.Update("RoomMembers", new[] { "bob", "cat" }, t.AddSeconds(1));
+    vt.Update("LiveViewers", new[] { "amy" }, t.AddSeconds(5));           // bob still in RoomMembers
+    vt.Update("RoomMembers", new[] { "cat" }, t.AddSeconds(10));          // bob gone from both
+    vt.Tick(t.AddSeconds(15)); Check(!ev.Contains("-bob"), "leave grace period");
+    vt.Tick(t.AddSeconds(31)); Check(ev.Contains("-Bob") && string.Join(",", ev.Where(e => e[0] == '+')) == "+amy,+Bob,+cat", "joins/leaves (self excluded, case-insensitive): " + string.Join(",", ev));
+    vt.Update("LiveViewers", new[] { "amy", "bob" }, t.AddSeconds(60));
+    var bob = vt.Snapshot().First(v => v.Name == "Bob");
+    Check(bob.Visits == 2 && bob.Total == TimeSpan.FromSeconds(5) && vt.PresentCount == 3, $"rejoin: visits {bob.Visits}, total {bob.Total}");
+    // --- library scan (real ffprobe/ffmpeg) ---
+    var ldir = $"{dir}/lib"; if (Directory.Exists(ldir)) Directory.Delete(ldir, true); Directory.CreateDirectory(ldir + "/sub");
+    File.Copy("/workspace/epikchat/sample.mp4", ldir + "/sample.mp4"); File.Copy($"{dir}/hd_1080_60.mov", ldir + "/sub/HD Clip (Official Video).mov");
+    File.WriteAllText(ldir + "/broken.mp4", "not a video"); File.WriteAllText(ldir + "/notes.txt", "x");
+    var store = new LibraryStore { Dir = $"{dir}/libstore" }; if (Directory.Exists(store.Dir)) Directory.Delete(store.Dir, true);
+    store.Settings.Folders.Add(ldir);
+    var probe = FfmpegLocator.FindProbe(FF)!;
+    var res = await LibraryScanner.ScanAsync(store, probe, FF, null, CancellationToken.None);
+    var items = store.Snapshot();
+    Check(res.total == 3 && res.failed == 1 && items.All(i => !i.Path.EndsWith(".txt")), $"scan: {res}");
+    var hd = items.First(i => i.Path.EndsWith(".mov"));
+    Check(hd.Height == 1080 && hd.Duration > 7 && hd.VideoCodec.Length > 0 && hd.Title == "HD Clip", $"probe: {hd.Title} {hd.Width}x{hd.Height} {hd.VideoCodec}/{hd.AudioCodec} {hd.DurationText}");
+    Check(File.Exists(hd.Thumb), "thumbnail cached: " + hd.Thumb);
+    var reload = LibraryStore.Load(store.Dir); Check(reload.Items.Count == 3, "library.json persisted");
+    var sw = System.Diagnostics.Stopwatch.StartNew(); res = await LibraryScanner.ScanAsync(reload, probe, FF, null, CancellationToken.None);
+    Check(res.probed == 0 && res.failed == 1, $"rescan uses the cache ({sw.ElapsedMilliseconds} ms)");
+    Check(LibraryStore.Query(items, "hd clip", "Title", "All").Count() == 1 && LibraryStore.Query(items, "", "Duration", "HD (720p+)").Count() == 2 && LibraryStore.Query(items, "", "Title", "Missing metadata").Single().Path.EndsWith("broken.mp4")
+          && LibraryStore.Query(items, "", "Duration", "All").First().Duration <= 0, "search/sort/filter");
+    // --- now-playing card render ---
+    var cp = MakeProfile(); cp.NowPlaying.Enabled = true; var wd = $"{dir}/npwork"; Directory.CreateDirectory(wd);
+    File.Copy(CommandBuilder.DefaultFont(), Path.Combine(wd, CommandBuilder.FontName), true);
+    var info = new NowPlayingInfo("A Very Long Song Title That Needs Clipping Because It Goes On", "amy", "Next Song", 30, 120, hd.Thumb);
+    Check(NowPlayingCard.Render(FF, wd, cp, info), "card rendered " + NowPlayingCard.LastError);
+    var (cw, ch) = NowPlayingCard.Size(cp);
+    var px = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(FF, $"-v error -i {wd}/np_card.png -f rawvideo -pix_fmt rgba -") { RedirectStandardOutput = true })!;
+    var ms = new MemoryStream(); px.StandardOutput.BaseStream.CopyTo(ms); px.WaitForExit(); var raw = ms.ToArray();
+    int Px(int x, int y) => (y * cw + x) * 4;
+    int barY = ch - 2; int a1 = Px(cw / 8, barY), a2 = Px(cw * 7 / 8, barY);
+    Check(raw.Length == cw * ch * 4, $"card size {cw}x{ch}");
+    Check(raw[a1] > 130 && raw[a1 + 1] < 120 && raw[a1 + 2] > 200 && raw[a2] < 100 && raw[a2 + 2] < 100, $"progress bar at 25% in the accent colour ({raw[a1]},{raw[a1 + 1]},{raw[a1 + 2]} / {raw[a2]},{raw[a2 + 1]},{raw[a2 + 2]})");
+    Check(raw[Px(cw / 2, ch / 2) + 3] > 150, "card background opaque-ish");
+    Check(File.ReadAllText(Path.Combine(wd, NowPlayingCard.SubFile)) == "Requested by amy" && File.ReadAllText(Path.Combine(wd, NowPlayingCard.TimeFile)) == "0:30 / 2:00", "card texts");
+    Check(NowPlayingCard.Render(FF, wd, cp, null), "blank card");
+    px = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(FF, $"-v error -i {wd}/np_card.png -f rawvideo -pix_fmt rgba -") { RedirectStandardOutput = true })!;
+    ms = new MemoryStream(); px.StandardOutput.BaseStream.CopyTo(ms); px.WaitForExit(); raw = ms.ToArray();
+    Check(raw.Where((b, i) => i % 4 == 3).All(b => b == 0), "hidden card fully transparent");
+    var ea = string.Join(" ", CommandBuilder.EncoderArgs(cp, new List<CommandBuilder.Destination> { new("x", "rtmp://h/x/K") }, false, new(Card: true)));
+    Check(ea.Contains("-re -f image2 -loop 1 -framerate 5 -i np_card.png") && ea.Contains("[1:v]format=rgba[npc]") && ea.Contains("overlay@np="), "encoder card input + overlay");
+    // session history viewer fields
+    var vt2 = new ViewerTracker(new ViewerSettings()); var t2 = new DateTime(2026, 1, 1, 12, 0, 0);
+    vt2.Update("LiveViewers", new[] { "amy", "bob" }, t2); vt2.Update("LiveViewers", new[] { "amy" }, t2.AddMinutes(10)); vt2.Tick(t2.AddMinutes(30));
+    var st2 = new SessionTracker("P", new[] { "EpikChat" }, t2); st2.SetViewers(vt2.Snapshot(), t2.AddMinutes(30));
+    var rec2 = st2.Finish(t2.AddMinutes(30), "stopped");
+    Check(rec2.UniqueViewers == 2 && rec2.TopViewers.Count == 2 && rec2.TopViewers[0].StartsWith("amy (30 min)"), "session unique/top viewers: " + string.Join(",", rec2.TopViewers));
+    var csv2 = HistoryStore.ToCsv(new[] { rec2 }).Split("\r\n");
+    Check(csv2[0].EndsWith(",unique_viewers") && csv2[1].EndsWith(",2"), "csv unique_viewers column");
+    Console.WriteLine(fails == 0 ? "ALL V2.3 TESTS PASSED" : $"{fails} FAILED");
+    return fails;
+}
+
 if (mode == "unit")
 {
     Check(CommandBuilder.JoinUrl("rtmp://media.epikchat.com:1935/x/", "/KEY") == "rtmp://media.epikchat.com:1935/x/KEY", "JoinUrl");
@@ -250,7 +363,9 @@ if (mode == "audio")
     prof.Audio = new AudioSettings { Normalize = Environment.GetEnvironmentVariable("NORM") ?? "Loudnorm", TargetLufs = -16, MusicEnabled = true, MusicPlaylist = { "/tmp/zt/music1.mp3", "/tmp/zt/music2.wav" },
         MusicVolume = 0.3, Ducking = true, MicEnabled = true, MicDevice = "lavfi:sine=f=1000:sample_rate=44100,volume=0.1", MicNoiseGate = Environment.GetEnvironmentVariable("NORM") == null };
 }
-prof.RecordEnabled = true; prof.RecordFolder = $"{dir}/rec"; prof.RemuxToMp4 = true; prof.RecordPattern = "{profile}_{part}";
+if (mode == "requests") { prof.NowPlaying.Enabled = true; prof.NowPlaying.Mode = "Always"; prof.RecordEnabled = false; }
+else prof.RecordEnabled = true;
+prof.RecordFolder = $"{dir}/rec"; prof.RemuxToMp4 = true; prof.RecordPattern = "{profile}_{part}";
 if (Directory.Exists(prof.RecordFolder)) Directory.Delete(prof.RecordFolder, true);
 foreach (var f in new[] { "outA.flv", "outB.flv" }) File.Delete(Path.Combine(dir, f));
 var destinations = new List<CommandBuilder.Destination>
@@ -263,6 +378,14 @@ if (mode == "fatal") prof.MaxRetries = 4;
 var eng = new StreamEngine(prof, FF, destinations, new[] { "SECRET|KEY" }, $"{dir}/work");
 var logAll = new StringBuilder();
 eng.TextOverlays = mode == "audio";
+SongRequestQueue? rq = null; var reqLib = new List<LibraryItem>(); var tracks = new List<string>();
+if (mode == "requests")
+{
+    rq = new SongRequestQueue(new RequestSettings { SkipVotes = 2 }); eng.Requests = rq;
+    reqLib.AddRange(prof.Playlist.Select(f => new LibraryItem { Path = f, Title = LibraryItem.TitleFromFile(f), Duration = 10 }));
+    eng.Library = f => reqLib.FirstOrDefault(i => i.Path == f);
+    eng.TrackChanged += f => { lock (tracks) tracks.Add(f); Console.WriteLine("TRACK " + Path.GetFileName(f)); };
+}
 eng.Log += s => { logAll.AppendLine(s); if (!s.StartsWith("> ") && !s.Contains("Changing video frame") && !s.Contains("filter context")) Console.WriteLine("LOG " + s); };
 eng.State += s => Console.WriteLine("STATE " + s);
 var destState = new Dictionary<int, DestState>();
@@ -297,6 +420,23 @@ else if (mode == "audio")
     At(9.5, () => Check(File.ReadAllText($"{dir}/work/{CommandBuilder.AlertFile}") == "", "alert cleared after its duration"), "ALERT OFF");
     At(11, () => { Check(eng.SetMusicMuted(false) && eng.SetMicMuted(false) && eng.SetOverlaysHidden(false), "zmq: unmute + show"); }, "UNMUTE");
     At(16, eng.Stop, "STOP");
+}
+else if (mode == "requests")
+{
+    // playlist: sample.mp4 (60s) → silent mkv → hd mov. A request for the hd clip must play right after sample.mp4,
+    // then a vote skip (threshold 2) cuts it and the playlist continues with the silent mkv. The card is rendered and overlaid.
+    At(3, () => Console.WriteLine("REQ " + rq!.Handle(new("amy", "!sr hd 1080 60"), reqLib, eng.OnAirItem, eng.TrackKey, 5, DateTime.Now)?.Reply), "REQUEST");
+    At(5, eng.Skip, "SKIP sample");
+    At(10, () =>
+    {
+        Check(tracks.Count >= 2 && tracks[1].EndsWith("hd_1080_60.mov"), "request played next: " + string.Join(" → ", tracks.Select(Path.GetFileName)));
+        Check(rq!.Playing?.User == "amy" && eng.NowPlaying()?.RequestedBy == "amy", "now playing knows the requester");
+        var a = rq.VoteSkip("x", eng.TrackKey, 5); var b = rq.VoteSkip("y", eng.TrackKey, 5);
+        Check(!a.Skip && b.Skip, "vote skip passed"); if (b.Skip) eng.Skip();
+        Check(eng.Card != null && eng.Card.Renders > 0, $"card rendered {eng.Card?.Renders}x");
+    }, "VOTE SKIP");
+    At(16, () => Check(tracks.Count >= 3 && tracks[2].EndsWith("silent_640x480_25.mkv"), "after the skip the playlist continues: " + string.Join(" → ", tracks.Select(Path.GetFileName))), "CHECK");
+    At(17, eng.Stop, "STOP");
 }
 else if (mode == "drop")
 {

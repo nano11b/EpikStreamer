@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.3.0 — 2026-10-25
+### Added
+- **Media library** (Library tab):
+  - Watched folders, scanned with ffprobe (metadata, duration, resolution, codecs) and thumbnailed. Results are cached by size+mtime.
+  - List/grid views with search, sort and filter.
+  - Saved playlists (create/rename/delete/reorder, drag from the library) that can become the stream playlist or be queued.
+  - The library is the source for song requests.
+- **Song requests**:
+  - Commands: `!request`/`!sr` (fuzzy match), `!queue`, `!skip` (vote, by count or % of viewers) and `!wrongsong`.
+  - Limits: per-user limit, cooldown, max queue, max length, allow/block lists.
+  - Placement: next, or end of the playlist pass.
+  - Host controls: approval, approve/deny/reorder/clear.
+  - A request is inserted at the next track boundary with the configured transition.
+  - Replies go to the on-stream overlay. Chat replies are still opt-in.
+- **Now-playing card**:
+  - Shows the title, thumbnail, progress/time, up next and the requester.
+  - Auto (N s on each track change) or Always mode.
+  - Position, width, colors, opacity and label are configurable.
+  - Rendered to a PNG that ffmpeg re-reads (`-re -f image2 -loop 1`), so it updates about once a second without restarting the stream.
+- **Viewer list**:
+  - Names come from the LIVE → Viewers panel and/or Room members, with join/leave times, total watch time, visits and a leave grace period.
+  - Optional on-stream welcome alert (off by default).
+  - History records unique viewers and the top 20 by watch time. The CSV gains a `unique_viewers` column.
+  - "Open profile" clicks the name in EpikChat's own UI. There's no automated moderation.
+### Known limitations
+- The LIVE "Viewers" panel selectors are a best guess and **not verified** against the live site. Chat diagnostics now report what they match (`viewers`, `verified:false`).
+- Member lists are virtualized, so only rendered rows are seen.
+- The default now-playing position (bottom-left) can overlap a bottom-left text ticker. Move one of them.
+
 ## 2.2.2 — 2026-10-25
 ### Fixed
 - **Chat commands did nothing.** Root cause: the old chat observer guessed generic markup (`[data-message-id]`, `.chat-message`, `.message`, `[class*='message']`, `[role='listitem']`, a `textarea`/placeholder input and a Send button), and none of it exists in EpikChat. EpikChat renders messages in a react-virtuoso list (`div[role="log"][aria-label="Chat messages"]`) whose rows are `[data-chat-message-row="<id>"]` and are constantly re-created while scrolling, so the observer never matched a single message. Its fallback text would also have included the toolbar and the reply quote. On top of that, commands were only handled while a stream was running.

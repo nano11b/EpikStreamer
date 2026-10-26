@@ -28,7 +28,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        foreach (var c in Enum.GetValues<Corner>()) { ImgCorner.Items.Add(c); TxtCorner.Items.Add(c); ClkCorner.Items.Add(c); }
+        foreach (var c in Enum.GetValues<Corner>()) { ImgCorner.Items.Add(c); TxtCorner.Items.Add(c); ClkCorner.Items.Add(c); NpCorner.Items.Add(c); }
         foreach (var (id, label) in FfmpegLocator.Encoders) EncoderCombo.Items.Add(new ComboBoxItem { Content = label, Tag = id });
         foreach (var t in CommandBuilder.Transitions) TransitionCombo.Items.Add(t);
         foreach (var pr in OutputTarget.Presets) OutPresetCombo.Items.Add(pr.Name);
@@ -85,7 +85,7 @@ public partial class MainWindow : Window
         TxtCorner.SelectedItem = o.TextCorner; TxtBox.IsChecked = o.TextBackground; TxtTicker.IsChecked = o.Ticker; TxtSpeed.Text = o.TickerSpeed.ToString();
         FontPath.Text = o.FontFile;
         ClkEnable.IsChecked = o.ClockEnabled; ClkFormat.Text = o.ClockFormat; ClkSize.Text = o.ClockFontSize.ToString(); ClkCorner.SelectedItem = o.ClockCorner;
-        LoadAudio(p);
+        LoadAudio(p); LoadNowPlaying(p);
         _loading = false;
     }
 
@@ -116,7 +116,7 @@ public partial class MainWindow : Window
         o.Ticker = TxtTicker.IsChecked == true; o.TickerSpeed = Int(TxtSpeed.Text, 120, 10, 5000); o.FontFile = FontPath.Text.Trim();
         o.ClockEnabled = ClkEnable.IsChecked == true; o.ClockFormat = ClkFormat.Text; o.ClockFontSize = Int(ClkSize.Text, 28, 6, 400);
         o.ClockCorner = (Corner)(ClkCorner.SelectedItem ?? Corner.TopLeft);
-        SaveAudio(p);
+        SaveAudio(p); SaveNowPlaying(p);
     }
 
     void Persist()
@@ -315,6 +315,7 @@ public partial class MainWindow : Window
         try
         {
             _engine = new StreamEngine(run, ff, dests, secrets);
+            HookEngine23(_engine);
             _engine.TextOverlays = (chatCfg.CommandsEnabled && chatCfg.ShowOnStream) || chatCfg.AlertsEnabled;
             _engine.SetMusicMuted(_musicMuted); _engine.SetMicMuted(_micMuted); _engine.SetOverlaysHidden(_overlaysHidden);
             BeginSession(run, destNames);
@@ -537,7 +538,7 @@ public partial class MainWindow : Window
         SViewers.Text = viewers?.ToString() ?? "–";
         OnViewerCount(viewers);
         SLive.Text = ChatToggle.IsChecked != true ? "–" : live ? "🔴 LIVE" : "offline";
-        Title = "EpikStreamer 2.2.2" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
+        Title = "EpikStreamer 2.3.0" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
     }
 
     // ---------- updates ----------

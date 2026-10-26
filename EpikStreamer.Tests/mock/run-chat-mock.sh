@@ -32,6 +32,12 @@ dg=json.dumps(d['diag']); check('MeStreamer' not in dg and 'alice' not in dg and
 # commands as the app would see them (non-bot, non-self, starts with !)
 cmds=[m for m in P if not m['isBot'] and not m['self'] and m['text'].lower().startswith('!')]
 check(len(cmds)==4,f'exactly 4 commands to answer: {[c["text"] for c in cmds]}')
+V=d['viewers']; print('   viewers:',V)
+lv=[n for s,n in V if s=='LiveViewers']
+check(lv[:1]==['bob,carol'] and 'bob,carol,zed' in lv and lv[-1]=='carol,zed','LIVE viewers list snapshots (join zed, leave bob)')
+check(any(s=='RoomMembers' and n=='alice,MeStreamer' for s,n in V),'room members list read')
+check(d['openRes']==['opened','not found (scroll the member list so the name is visible)'] and d['profileClicks']==1,'open-profile quick action clicks the normal member button')
+check(d['diag']['viewers']['verified'] is False and d['diag']['viewers']['viewersFound'] and 'carol' not in json.dumps(d['diag']['viewers']),'viewer selectors flagged unverified in diagnostics (sanitized)')
 json.dump(P,open('/tmp/chat-posted.json','w'))
 print('CHAT MOCK PASSED' if fails==0 else f'{fails} FAILED'); sys.exit(1 if fails else 0)
 PY

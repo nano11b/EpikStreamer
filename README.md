@@ -1,4 +1,4 @@
-# EpikStreamer 2.2.2
+# EpikStreamer 2.3.0
 
 Windows desktop app (WPF, .NET 8) that streams local video files to RTMP ingests such as EpikChat's
 **Go live → RTMP encoder** (server `rtmp://media.epikchat.com:1935/x` + your stream key) using ffmpeg.
@@ -7,9 +7,9 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 ## Downloads (GitHub Releases: https://github.com/nano11b/EpikStreamer/releases)
 | Package | Contents |
 |---|---|
-| `EpikStreamer-2.2.2-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
-| `EpikStreamer-v2.2.2-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
-| `EpikStreamer-v2.2.2-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
+| `EpikStreamer-2.3.0-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
+| `EpikStreamer-v2.3.0-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
+| `EpikStreamer-v2.3.0-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
 
 ## Features
 - **Playlist** (Source / Playlist tab): add/drag-drop MP4/MKV/MOV/AVI/WebM…, remove, reorder, loop the whole playlist, shuffle, **⏭ Next** to skip.
@@ -21,6 +21,12 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 - **Profiles**: named profiles (outputs, recording, encoder, resolution/fps/bitrates, overlays, playlist) with New / Rename / Duplicate / Delete and a quick-switch dropdown.
   Saved to `%APPDATA%\EpikStreamer\profiles.json`. Stream keys are saved only when **Remember keys** is ticked, and then it's encrypted with Windows DPAPI (CurrentUser). Otherwise it's kept in memory for the session only.
   A v1 `settings.json` is migrated into a profile named **Default**, and v2.0 profiles (one server + key) become a single EpikChat output.
+
+## New in 2.3
+- **Library** tab: watch media folders (with or without subfolders). A scan reads title/artist, duration, resolution and codecs with ffprobe and makes thumbnails. Results are cached in `%APPDATA%\EpikStreamer\library`, so a rescan only probes new or changed files. You get a list or grid view with search, sort (title, duration, recently added, most played, folder, resolution) and filters (HD/SD, short/long, never played, missing metadata). Saved playlists can be created, renamed, reordered and filled by dragging from the library, then used as the stream playlist or queued.
+- **Song requests** (Requests tab): `!request <name>` / `!sr <name>` finds the closest library match (typo-tolerant). `!queue` shows what's next, `!skip` is a vote skip (N votes or a % of viewers) and `!wrongsong` lets the requester undo theirs. You can set a per-user limit, cooldown, max queue length, max song length, allow/block lists and optional host approval, and choose whether requests play next or after the current playlist pass. The host can approve, deny, reorder and clear. Replies appear on stream and are only posted in chat if "Reply in chat" is on.
+- **Now playing card** (Overlays tab): a card with the title, thumbnail, progress/time, up next and who requested it. It can appear for N seconds on each track change or stay up all the time, and its position, width, colors and opacity are configurable. It's redrawn live without restarting the stream.
+- **Viewers** tab: names are read from the chat panel's LIVE → Viewers list and/or the Room members list. It shows who's here, join/leave times, total watch time and visits. You can turn on an optional on-stream welcome alert. Session history records unique viewers. **Open profile** clicks the name in EpikChat's own list. There are no automated moderation actions. ⚠ The Viewers-list selectors are not verified against the live site yet (see Chat diagnostics).
 
 ## New in 2.2
 - **Schedule** tab: one-off, daily or weekly streams with start/stop times, a profile and a playlist file. Settings → *Launch at Windows startup* lets the schedule run unattended.

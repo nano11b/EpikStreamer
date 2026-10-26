@@ -51,6 +51,45 @@ public sealed class StreamEngine
     readonly object _txtLk = new();
     System.Threading.Timer? _alertTimer, _chatTimer;
 
+    // ---- v2.3: song requests, track changes, now-playing card ----
+    /// <summary>Request queue consulted at every track boundary (null = no requests).</summary>
+    public SongRequestQueue? Requests { get; set; }
+    /// <summary>Library lookup for titles/thumbnails (null = file names).</summary>
+    public Func<string, LibraryItem?>? Library { get; set; }
+    /// <summary>Fires (on a background thread) when a new item goes on air: path.</summary>
+    public event Action<string>? TrackChanged;
+    public NowPlayingController? Card => _np;
+    NowPlayingController? _np; volatile string _onAir = "", _upNext = ""; int _trackNo; double _onAirPos;
+    public string OnAirItem => _onAir;
+    public string UpNextItem => _upNext;
+    /// <summary>Changes whenever a new track starts (vote-skip votes are per track).</summary>
+    public string TrackKey => _trackNo + "|" + _onAir;
+    public string TitleOf(string path) => string.IsNullOrEmpty(path) ? "" : Library?.Invoke(path)?.Display is { Length: > 0 } t ? t : LibraryItem.TitleFromFile(path);
+    public NowPlayingInfo? NowPlaying()
+    {
+        var item = _onAir; if (item.Length == 0) return null;
+        var lib = Library?.Invoke(item);
+        double dur = lib?.Duration > 0 ? lib.Duration : (_probeCache.TryGetValue(item, out var mi) ? mi.Duration : 0);
+        var req = Requests?.Playing; var by = req != null && string.Equals(req.Path, item, StringComparison.OrdinalIgnoreCase) ? req.User : "";
+        var next = Requests?.PeekNext()?.Path ?? _upNext;
+        return new NowPlayingInfo(TitleOf(item), by, TitleOf(next), _onAirPos, dur, lib?.Thumb ?? "");
+    }
+
+    /// <summary>Inserts the next approved request after position <paramref name="afterIdx"/> of the current order.</summary>
+    bool InsertRequest(int afterIdx)
+    {
+        var rq = Requests; if (rq == null) return false;
+        for (int guard = 0; guard < 20; guard++)
+        {
+            var r = rq.TakeNext(afterIdx + 1 >= _order.Count); if (r == null) return false;
+            if (!File.Exists(r.Path)) { Emit("♪ Requested file is missing, skipping: " + r.Path); continue; }
+            var n = new List<string>(_order); n.Insert(Math.Min(afterIdx + 1, n.Count), r.Path); _order = n;
+            rq.Scheduled(r); Emit($"♪ Request from {r.User}: {r.Title} (plays next)");
+            return true;
+        }
+        return false;
+    }
+
     volatile bool _stop, _skip;
     Process? _enc, _feed;
     readonly object _lk = new();
@@ -89,6 +128,17 @@ public sealed class StreamEngine
         if (_p.Playlist.Count == 0) throw new InvalidOperationException("Playlist is empty.");
         if (_netDests.Count == 0 && !_p.RecordEnabled) throw new InvalidOperationException("No enabled output and recording is off.");
         PrepareOverlayFiles();
+        _onAir = ""; _upNext = ""; _np?.Dispose(); _np = null;
+        if (_p.NowPlaying.Enabled)
+        {
+            if (File.Exists(Path.Combine(WorkDir, CommandBuilder.FontName)))
+            {
+                _np = new NowPlayingController(_ffmpeg, WorkDir, _p, NowPlaying) { Hidden = OverlaysHidden };
+                _np.Log += Emit;
+                if (!File.Exists(Path.Combine(WorkDir, NowPlayingCard.CardFile))) { Emit("Now-playing card disabled: " + NowPlayingCard.LastError); _np.Dispose(); _np = null; }
+            }
+            else Emit("Now-playing card disabled: no font file.");
+        }
         _stop = false; IsRunning = true;
         _thread = new Thread(Run) { IsBackground = true, Name = "EpikStreamer engine" };
         _thread.Start();
@@ -131,6 +181,7 @@ public sealed class StreamEngine
         if (o.ImageEnabled && File.Exists(o.ImagePath)) ok &= Ctl("colorchannelmixer@logo", "aa", h ? "0" : Inv(Math.Clamp(o.ImageOpacity, 0, 1)));
         if (o.TextEnabled && !string.IsNullOrWhiteSpace(o.Text)) ok &= Ctl("drawtext@text", "enable", h ? "0" : "1");
         if (o.ClockEnabled) ok &= Ctl("drawtext@clock", "enable", h ? "0" : "1");
+        if (_np is { } np) { np.Hidden = h; Task.Run(np.Tick); }
         return ok;
     }
     static string Inv(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
@@ -220,11 +271,11 @@ public sealed class StreamEngine
             File.Copy(font, Path.Combine(WorkDir, CommandBuilder.FontName), true); // referenced relatively => no path escaping issues
         }
         var utf8 = new UTF8Encoding(false);
-        if (TextOverlays && !(o.TextEnabled || o.ClockEnabled))
+        if ((TextOverlays || _p.NowPlaying.Enabled) && !(o.TextEnabled || o.ClockEnabled))
         {
             var font = string.IsNullOrWhiteSpace(o.FontFile) ? CommandBuilder.DefaultFont() : o.FontFile;
             if (File.Exists(font)) File.Copy(font, Path.Combine(WorkDir, CommandBuilder.FontName), true);
-            else { Emit("No font for on-stream alerts/chat responses; they're disabled. " + font); TextOverlays = false; }
+            else { Emit("No font for on-stream alerts/chat responses/now-playing card; they're disabled. " + font); TextOverlays = false; }
         }
         File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.TextFile), o.Text ?? "", utf8);
         File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.AlertFile), "", utf8);
@@ -289,7 +340,7 @@ public sealed class StreamEngine
         finally
         {
             KillFeeder(); Interlocked.Increment(ref _musicGen); try { if (_enc is { HasExited: false }) _enc.Kill(true); } catch { }
-            _ctl?.Dispose(); _ctl = null; _alertTimer?.Dispose(); _chatTimer?.Dispose();
+            _ctl?.Dispose(); _ctl = null; _alertTimer?.Dispose(); _chatTimer?.Dispose(); _np?.Dispose();
             for (int i = 0; i < _netDests.Count; i++) DestinationStatus?.Invoke(i, DestState.Stopped, "");
             RemuxRecordings();
             IsRunning = false; Finished?.Invoke();
@@ -334,7 +385,7 @@ public sealed class StreamEngine
         int ctlPort = RuntimeControl && caps.HasFilter("azmq") ? StreamControl.FreePort() : 0;
         int musicPort = MusicActive ? StreamControl.FreePort() : 0;
         var lo = new CommandBuilder.LiveOptions(ctlPort, musicPort, MicActive ? a.MicDevice : null, TextOverlays,
-            MusicMuted ? 0 : a.MusicVolume, MicMuted ? 0 : a.MicVolume, a.MainVolume);
+            MusicMuted ? 0 : a.MusicVolume, MicMuted ? 0 : a.MicVolume, a.MainVolume, _np != null);
         _ctl?.Dispose(); _ctl = ctlPort > 0 ? new StreamControl(ctlPort) : null;
         var args = CommandBuilder.EncoderArgs(_p, dests, hasLogo, lo, caps);
         Emit("> ffmpeg " + CommandBuilder.Display(args, _secrets));
@@ -439,6 +490,17 @@ public sealed class StreamEngine
         {
             idx = s.Idx; count = s.Order.Count; name = Path.GetFileName(s.Item); pos = s.SrcStart + (t - s.Tl0);
             if (s.Transition) name += " → " + Path.GetFileName(s.NextOrder[s.NextIdx]);
+            var cur = s.Transition ? s.NextOrder[s.NextIdx] : s.Item;
+            _onAirPos = s.Transition ? (t - s.Tl0) : pos;
+            if (cur != _onAir)
+            {
+                _onAir = cur; _trackNo++;
+                var o = s.Transition ? s.NextOrder : s.Order; int i = s.Transition ? s.NextIdx : s.Idx;
+                _upNext = i + 1 < o.Count ? o[i + 1] : (_p.LoopPlaylist && _p.Playlist.Count > 0 ? _p.Playlist[0] : "");
+                Requests?.OnAir(cur);
+                try { TrackChanged?.Invoke(cur); } catch { }
+                _np?.TrackChanged(TrackKey);
+            }
         }
         Stats?.Invoke(new StreamStats(D(kv, "fps"), D(kv, "bitrate"), D(kv, "speed"), (long)D(kv, "frame"),
             (long)D(kv, "drop_frames"), (long)D(kv, "dup_frames"), _uptime.Elapsed, _reconnects, idx, count, name, pos));
@@ -486,6 +548,7 @@ public sealed class StreamEngine
 
     (List<string> order, int idx)? PeekNext(List<string> order, int idx)
     {
+        if (ReferenceEquals(order, _order) && idx == _idx && InsertRequest(idx)) return (_order, idx + 1);
         if (idx + 1 < order.Count) return (order, idx + 1);
         if (!_p.LoopPlaylist) return null;
         var saveO = _order; NewOrder(); var n = _order; _order = saveO;
@@ -542,7 +605,12 @@ public sealed class StreamEngine
                 if (r == SegResult.EncoderGone) return false;
                 if (r == SegResult.Failed) { _idx++; _pos = 0; if (++failsInRow >= _order.Count) return true; continue; }
                 failsInRow = 0;
-                if (r == SegResult.Skipped) { _skip = false; _idx++; _pos = 0; continue; }   // hard cut to the next item
+                if (r == SegResult.Skipped) { _skip = false; InsertRequest(_idx); _idx++; _pos = 0; continue; }   // hard cut to the next item
+            }
+            if (Requests != null && Requests.PeekNext() != null && !_stop && InsertRequest(_idx))
+            {   // a request arrived while this item played: it goes next (re-plan the transition)
+                var rn = (_order, _idx + 1);
+                if (Playable(_order[_idx + 1], out var rInfo)) { nx = rn; infoB = rInfo; if (X > 0) { X = Frames(Math.Min(X, rInfo.Duration / 2)); if (X < 2.0 / _p.Fps) X = 0; } }
             }
             if (nx == null) { _idx = _order.Count; continue; }
 

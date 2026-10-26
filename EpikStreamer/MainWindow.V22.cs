@@ -35,6 +35,7 @@ public partial class MainWindow
         _chat.MessageReceived += m => Dispatcher.BeginInvoke(() => OnChatMessage(m));
         _chat.ObserverStatus += t => Dispatcher.BeginInvoke(() => { ChatObsStatus.Text = "Chat observer: " + t; Log("💬 chat observer: " + t); });
         ApplyChatPanelConfig();
+        Init23();
         _schedTimer.Tick += (_, _) => SchedulerTick(); _schedTimer.Start();
         SourceInitialized += (_, _) => { _hotkeys = new GlobalHotkeys(this); ApplyHotkeys(); };
         _tray = new Tray(ShowMain, () => Dispatcher.BeginInvoke(ToggleStartStop), () => _engine?.Skip(),
@@ -234,6 +235,7 @@ public partial class MainWindow
     {
         var c = _store.Chat;
         if (c.DebugLog) Log($"💬 [{m.Room}] {m.User}{(m.IsBot ? " (bot)" : "")}{(m.Self ? " (you)" : "")}: {m.Text}");
+        if (HandleRequestCommand(m)) return;
         bool live = _engine?.IsRunning == true;
         var ctx = new ChatCommands.Context { Song = System.IO.Path.GetFileNameWithoutExtension(_lastStats?.ItemName ?? ""), Uptime = live ? _lastStats?.Uptime ?? TimeSpan.Zero : TimeSpan.Zero, Viewers = _lastViewers, Music = _engine?.CurrentMusic ?? "" };
         var resp = HandleChatCommand(m, ctx);
@@ -288,6 +290,7 @@ public partial class MainWindow
     }
     void EndSession(string reason)
     {
+        EndSession23();
         var s = _session; _session = null; if (s == null) return;
         try { var r = s.Finish(DateTime.Now, reason); if (r.DurationSec >= 5) _history.Append(r); } catch (Exception ex) { Log("Could not save session history: " + ex.Message); }
         RefreshHistory();

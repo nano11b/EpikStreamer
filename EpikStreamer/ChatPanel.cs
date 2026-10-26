@@ -111,6 +111,14 @@ public class ChatPanel : DockPanel
                 return;
             }
             if (type == "epik-chat-status") { ObserverStatus?.Invoke(Str("text")); return; }
+            if (type == "epik-viewers")
+            {
+                var names = new List<string>();
+                if (r.TryGetProperty("names", out var na) && na.ValueKind == JsonValueKind.Array)
+                    foreach (var n in na.EnumerateArray()) if (n.ValueKind == JsonValueKind.String && n.GetString() is { Length: > 0 and <= 64 } nm) names.Add(nm);
+                ViewersReceived?.Invoke(Str("source"), names);
+                return;
+            }
             if (type != "epik-status") return;
             int? viewers = r.TryGetProperty("viewers", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
             bool live = r.TryGetProperty("live", out var l) && l.ValueKind == JsonValueKind.True;
@@ -137,6 +145,21 @@ public class ChatPanel : DockPanel
     /// <summary>Opt-in ("Reply in chat", off by default): types <paramref name="text"/> into EpikChat's normal composer as the
     /// signed-in user and presses Enter. Rate-limited, max 250 chars. Prefers DevTools Input.insertText + Enter (real input
     /// events React accepts), falling back to the page-side helper (native value setter + input event + form.requestSubmit).</summary>
+    /// <summary>v2.3: (source, names) from the LIVE Viewers panel or the Room members list.</summary>
+    public event Action<string, List<string>>? ViewersReceived;
+
+    /// <summary>v2.3: open a user's profile by clicking their name in EpikChat's own list (normal UI only, no moderation).</summary>
+    public async Task<string> OpenProfile(string name)
+    {
+        if (!IsLoaded2) return "chat not open";
+        try
+        {
+            var r = await _web.CoreWebView2.ExecuteScriptAsync($"window.__epikOpenProfile ? window.__epikOpenProfile({JsonSerializer.Serialize(name)}) : 'no-helper'");
+            return JsonSerializer.Deserialize<string>(r) ?? "?";
+        }
+        catch (Exception ex) { return "error: " + ex.Message; }
+    }
+
     public async Task<string> SendChat(string text)
     {
         if (!IsLoaded2) return "chat not open";

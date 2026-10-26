@@ -18,7 +18,10 @@
       <div data-viewport-type="element"><div data-testid="virtuoso-item-list" id="listB"></div></div></div></div>
   </div>
   <aside><div role="list" aria-label="Room members" data-virtuoso-scroller="true"><div data-testid="virtuoso-item-list">
-    <div data-index="0"><button aria-label="Open alice">alice</button></div></div></div></aside>
+    <div data-index="0"><button aria-label="Open alice" id="memAlice">alice</button></div><div data-index="1"><button>MeStreamer</button></div></div></div></aside>
+  <!-- LIVE panel (structure is a guess, like the app's viewer selectors) -->
+  <section><h3>Viewers (2)</h3><div role="list" id="viewers">
+    <div role="listitem"><button>bob</button><span>watching</span></div><div role="listitem"><button>carol</button></div></div></section>
   <form id="composerForm"><input data-chat-composer-input aria-label="Chat message" type="text" maxlength="250" placeholder="Message"></form>
 </main>
 <script>
@@ -84,12 +87,17 @@ at(4500, () => {   // room switch: B becomes visible; its existing rows are back
   document.getElementById('paneWrapB').setAttribute('aria-hidden', 'false'); document.getElementById('paneWrapB').style.display = '';
   document.getElementById('roomTitle').textContent = 'Room B';
 });
+at(3000, () => { const d = document.createElement('div'); d.setAttribute('role', 'listitem'); d.innerHTML = '<button>zed</button>'; document.getElementById('viewers').appendChild(d); });
+at(6000, () => { document.getElementById('viewers').firstElementChild.remove(); });
+let profileClicks = 0; document.getElementById('memAlice').addEventListener('click', () => profileClicks++);
+at(6500, () => { window.__openRes = [window.__epikOpenProfile('Alice'), window.__epikOpenProfile('nobody')]; });
 at(7000, () => append(listB, nid(), 'erin', '!song'));
 at(9000, () => {
-  document.title = JSON.stringify({ posted: window.__posted, statuses: window.__statuses, sent, sendResult: window.__sendResult, diag: JSON.parse(window.__epikDiag()) });
+  document.title = JSON.stringify({ viewers: window.__viewers, openRes: window.__openRes, profileClicks, posted: window.__posted, statuses: window.__statuses, sent, sendResult: window.__sendResult, diag: JSON.parse(window.__epikDiag()) });
 });
 window.__posted = []; window.__statuses = [];
-window.__epikTap = m => { if (m.type === 'epik-chat') window.__posted.push(m); else window.__statuses.push(m.text); };
+window.__viewers = [];
+window.__epikTap = m => { if (m.type === 'epik-chat') window.__posted.push(m); else if (m.type === 'epik-viewers') window.__viewers.push([m.source, m.names.join(',')]); else window.__statuses.push(m.text); };
 const t0 = Date.now();
 steps.forEach(([ms, f]) => setTimeout(f, ms));
 </script>

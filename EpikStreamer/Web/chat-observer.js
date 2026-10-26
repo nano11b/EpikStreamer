@@ -1,4 +1,4 @@
-// EpikStreamer chat observer (v2.2.2). Injected into EpikChat's normal /chat page in the app's WebView2 panel.
+// EpikStreamer chat observer (v2.3.0). Injected into EpikChat's normal /chat page in the app's WebView2 panel.
 // Only READS the page DOM (and, when the user enabled "Reply in chat", types into the normal composer).
 // Matches EpikChat's real markup (verified 2026-10-25, Lobby, signed in):
 //   list   div[role=log][aria-label="Chat messages"] (react-virtuoso, ~44 rows rendered, rows churn)
@@ -18,6 +18,10 @@
     composer: 'input[data-chat-composer-input][aria-label="Chat message"], input[data-chat-composer-input]',
     self: 'header button[aria-label^="Account"], header button[aria-label*="account" i], header [data-account-button], header button[aria-haspopup="menu"][aria-label]',
     members: '[role="list"][aria-label="Room members"]',
+    // v2.3 viewer list. ⚠ NOT VERIFIED against the live site: EpikChat's LIVE panel "Viewers" list markup is a guess
+    // (any list labelled/titled "Viewers"). Override via CFG.sel.viewers; diagnostics report what matched.
+    viewers: '[role="list"][aria-label="Viewers" i], [role="list"][aria-label*="viewers" i], [aria-label="Viewers" i] [role="list"], [data-live-viewers] [role="list"]',
+    memberRow: '[data-index], [role="listitem"]',
   }, CFG.sel || {});
   const post = m => { try { window.chrome.webview.postMessage(m); } catch { } if (window.__epikTap) window.__epikTap(m); };
   const status = text => post({ type: 'epik-chat-status', text });
@@ -166,9 +170,54 @@
     }, null, 1);
   };
 
+  // ---- v2.3: viewer / member names (read-only) ----
+  // Names come from each row's first button (EpikChat rows open a profile from it) or its first text line.
+  const rowName = r => {
+    const b = r.querySelector('button'); let n = '';
+    if (b) { n = (b.textContent || '').trim(); const al = b.getAttribute('aria-label') || ''; if (!n && /^Open /.test(al)) n = al.slice(5); if (!n && /'s profile$/.test(al)) n = al.slice(0, -10); }
+    if (!n) n = ((r.innerText || r.textContent || '').trim().split('\n')[0] || '');
+    return n.replace(/\s+/g, ' ').trim().slice(0, 40);
+  };
+  const viewersList = () => {
+    let el = null; try { el = [...document.querySelectorAll(S.viewers)].find(shown) || null; } catch { }
+    if (!el) {   // heading "Viewers" (optionally with a count) followed by a list
+      const h = [...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],button,span,div')].find(e => e.children.length <= 2 && /^\s*viewers\s*(\(?\d+\)?)?\s*$/i.test(e.textContent || '') && shown(e));
+      if (h) { let p = h.parentElement; for (let i = 0; i < 4 && p && !el; i++, p = p.parentElement) el = p.querySelector('[role="list"], ul'); }
+    }
+    return el && !el.matches(S.members) ? el : null;
+  };
+  const namesIn = list => list ? [...new Set([...list.querySelectorAll(S.memberRow)].filter(r => !r.parentElement.closest(S.memberRow)).map(rowName).filter(Boolean))] : null;
+  const vst = { last: {}, at: 0 };
+  const scanViewers = () => {
+    for (const [source, list] of [['LiveViewers', viewersList()], ['RoomMembers', [...document.querySelectorAll(S.members)].find(shown) || null]]) {
+      const names = namesIn(list); if (!names) continue;
+      const key = names.slice().sort().join('\n');
+      if (vst.last[source] === key && Date.now() - vst.at < 30000) continue;
+      vst.last[source] = key; vst.at = Date.now();
+      post({ type: 'epik-viewers', source, names, virtualized: !!(list && list.matches('[data-virtuoso-scroller], [data-virtuoso-scroller] *')) || !!list.querySelector('[data-index]') });
+    }
+  };
+  CFG.viewerDiag = () => {
+    const v = viewersList(), m = document.querySelector(S.members);
+    return { verified: false, viewersSelectorHits: (() => { try { return document.querySelectorAll(S.viewers).length; } catch { return 'bad selector'; } })(),
+      viewersFound: !!v, viewersCount: v ? (namesIn(v) || []).length : 0, viewersSkeleton: skel(v, 5, { n: 40 }),
+      membersFound: !!m, membersCount: m ? (namesIn(m) || []).length : 0 };
+  };
+  // Quick action: open a user's profile the normal way (click their name in the member list or chat). No moderation.
+  window.__epikOpenProfile = name => {
+    const want = String(name || '').trim().toLowerCase(); if (!want) return 'no name';
+    const lists = [viewersList(), document.querySelector(S.members), findLog()].filter(Boolean);
+    for (const l of lists) for (const b of l.querySelectorAll('button')) {
+      const t = (b.textContent || '').trim().toLowerCase(), al = (b.getAttribute('aria-label') || '').toLowerCase();
+      if (t === want || al === 'open ' + want || al === want + "'s profile") { b.scrollIntoView({ block: 'center' }); b.click(); return 'opened'; }
+    }
+    return 'not found (scroll the member list so the name is visible)';
+  };
+
   window.__epikObs = st;
   const start = () => {
     new MutationObserver(schedule).observe(document.body || document.documentElement, { subtree: true, childList: true });
+    setInterval(() => { try { scanViewers(); } catch { } }, 3000); setTimeout(() => { try { scanViewers(); } catch { } }, 500);
     setInterval(schedule, 2000);   // re-resolve the visible pane periodically (room switches toggle aria-hidden)
     schedule();
   };

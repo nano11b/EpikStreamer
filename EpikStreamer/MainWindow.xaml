@@ -1,5 +1,5 @@
 <Window x:Class="EpikStreamer.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer 2.2.2" Width="1280" Height="760" MinWidth="820" MinHeight="600"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer 2.3.0" Width="1280" Height="760" MinWidth="820" MinHeight="600"
         Background="{DynamicResource Bg}" Closing="Window_Closing">
   <Grid Margin="12">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -100,6 +100,31 @@
               <TextBlock Text="Format"/><TextBox x:Name="ClkFormat" Width="150" ToolTip="strftime format, e.g. %Y-%m-%d %X  or  %H.%M (blank = default)"/>
               <TextBlock Text="Size" Margin="16,0,8,0"/><TextBox x:Name="ClkSize" Width="50"/>
               <TextBlock Text="Position" Margin="16,0,8,0"/><ComboBox x:Name="ClkCorner" Width="150"/>
+            </StackPanel>
+          </GroupBox>
+          <GroupBox Header="Now playing card (v2.3)">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <CheckBox x:Name="NpEnable" Content="Show a now-playing card" Width="190"/>
+                <TextBlock Text="Mode"/><ComboBox x:Name="NpMode" Width="190"><ComboBoxItem Content="Auto"/><ComboBoxItem Content="Always"/></ComboBox>
+                <TextBlock Text="Show for (s)" Margin="16,0,8,0"/><TextBox x:Name="NpSeconds" Width="50" ToolTip="Auto mode: seconds the card stays up after each track change"/>
+                <TextBlock Text="Position" Margin="16,0,8,0"/><ComboBox x:Name="NpCorner" Width="150"/>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Width (% of video)" Width="120"/><Slider x:Name="NpWidth" Minimum="20" Maximum="90" Width="150" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                <TextBlock Text="{Binding Value, ElementName=NpWidth, StringFormat={}{0:0}%}" Width="40"/>
+                <TextBlock Text="Background" Margin="10,0,8,0"/><TextBox x:Name="NpBg" Width="80"/>
+                <TextBlock Text="Opacity" Margin="10,0,8,0"/><Slider x:Name="NpOpacity" Minimum="0" Maximum="100" Width="120" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                <TextBlock Text="Text" Margin="10,0,8,0"/><TextBox x:Name="NpText" Width="80"/>
+                <TextBlock Text="Accent" Margin="10,0,8,0"/><TextBox x:Name="NpAccent" Width="80"/>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <CheckBox x:Name="NpThumb" Content="Thumbnail"/><CheckBox x:Name="NpProgress" Content="Progress bar + time" Margin="12,4,0,4"/>
+                <CheckBox x:Name="NpNext" Content="Up next" Margin="12,4,0,4"/><CheckBox x:Name="NpReq" Content="Requested by" Margin="12,4,0,4"/>
+                <TextBlock Text="Label" Margin="16,0,8,0"/><TextBox x:Name="NpLabel" Width="130"/>
+                <Button Content="Show now" Click="NpShow_Click" Style="{StaticResource Secondary}" Margin="16,0,0,0" ToolTip="While streaming: show the card now (Auto mode)"/>
+              </StackPanel>
+              <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Title (from metadata or the file name), library thumbnail, progress, up next and who requested it. The card is a picture that's redrawn about once a second and swapped in live, so the stream never restarts. It uses the text font above."/>
             </StackPanel>
           </GroupBox>
         </StackPanel>
@@ -402,6 +427,115 @@
           <Button Content="Save settings" Click="SaveSettings_Click" HorizontalAlignment="Left" Margin="0,6,0,0"/>
         </StackPanel>
         </ScrollViewer>
+      </TabItem>
+
+      <!-- LIBRARY (v2.3) -->
+      <TabItem Header="Library" x:Name="LibraryTab">
+        <DockPanel Margin="10">
+          <StackPanel DockPanel.Dock="Left" Width="230" Margin="0,0,10,0">
+            <TextBlock Text="Watched folders" FontWeight="Bold"/>
+            <ListBox x:Name="LibFolders" Height="110"/>
+            <StackPanel Orientation="Horizontal">
+              <Button Content="Add folder…" Click="LibAddFolder_Click"/>
+              <Button Content="Remove" Click="LibRemoveFolder_Click" Style="{StaticResource Secondary}"/>
+            </StackPanel>
+            <CheckBox x:Name="LibSubfolders" Content="Include subfolders"/>
+            <CheckBox x:Name="LibThumbs" Content="Make thumbnails"/>
+            <TextBlock Text="File types"/><TextBox x:Name="LibExt"/>
+            <Button x:Name="LibScanBtn" Content="Scan now" Click="LibScan_Click"/>
+            <TextBlock x:Name="LibStatus" Foreground="{DynamicResource Dim}" TextWrapping="Wrap"/>
+            <TextBlock Text="Saved playlists" FontWeight="Bold" Margin="0,12,0,0"/>
+            <ComboBox x:Name="PlCombo" SelectionChanged="PlCombo_Changed"/>
+            <StackPanel Orientation="Horizontal">
+              <Button Content="New" Click="PlNew_Click" Style="{StaticResource Secondary}"/>
+              <Button Content="Rename" Click="PlRename_Click" Style="{StaticResource Secondary}"/>
+              <Button Content="Delete" Click="PlDelete_Click" Style="{StaticResource Secondary}"/>
+            </StackPanel>
+            <ListBox x:Name="PlItems" Height="170" AllowDrop="True" Drop="PlItems_Drop" SelectionMode="Extended" ToolTip="Drag items here from the library"/>
+            <StackPanel Orientation="Horizontal">
+              <Button Content="▲" Click="PlUp_Click" Style="{StaticResource Secondary}"/>
+              <Button Content="▼" Click="PlDown_Click" Style="{StaticResource Secondary}"/>
+              <Button Content="Remove" Click="PlRemoveItem_Click" Style="{StaticResource Secondary}"/>
+            </StackPanel>
+            <Button Content="Use as stream playlist" Click="PlUse_Click" ToolTip="Replace the Source / Playlist list of the current profile"/>
+            <Button Content="Queue all (requests)" Click="PlQueue_Click" Style="{StaticResource Secondary}"/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+            <TextBlock Text="Search"/><TextBox x:Name="LibSearch" Width="220" TextChanged="LibQuery_Changed"/>
+            <TextBlock Text="Sort" Margin="12,0,6,0"/><ComboBox x:Name="LibSort" Width="130" SelectionChanged="LibQuery_Changed"/>
+            <TextBlock Text="Filter" Margin="12,0,6,0"/><ComboBox x:Name="LibFilter" Width="140" SelectionChanged="LibQuery_Changed"/>
+            <CheckBox x:Name="LibGrid" Content="Grid view" Margin="12,4,0,4" Click="LibView_Click"/>
+            <TextBlock x:Name="LibCount" Foreground="{DynamicResource Dim}" Margin="12,0,0,0"/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+            <Button Content="Add to request queue" Click="LibQueue_Click"/>
+            <Button Content="Add to saved playlist" Click="LibToPlaylist_Click" Style="{StaticResource Secondary}"/>
+            <Button Content="Add to stream playlist" Click="LibToStream_Click" Style="{StaticResource Secondary}"/>
+            <TextBlock Foreground="{DynamicResource Dim}" Margin="10,0,0,0" Text="Drag items onto a saved playlist. The library is what !request searches."/>
+          </StackPanel>
+          <ListBox x:Name="LibBox" SelectionMode="Extended" PreviewMouseLeftButtonDown="LibBox_MouseDown" PreviewMouseMove="LibBox_MouseMove"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled" VirtualizingPanel.IsVirtualizing="True"/>
+        </DockPanel>
+      </TabItem>
+
+      <!-- REQUESTS (v2.3) -->
+      <TabItem Header="Requests" x:Name="RequestsTab">
+        <DockPanel Margin="10">
+          <ScrollViewer DockPanel.Dock="Left" Width="330" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
+          <StackPanel>
+            <CheckBox x:Name="ReqEnable" Content="Song requests (!request / !sr, !queue, !skip, !wrongsong)"/>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Requests play" Width="150"/><ComboBox x:Name="ReqPlacement" Width="160"><ComboBoxItem Content="Next"/><ComboBoxItem Content="End"/></ComboBox></StackPanel>
+            <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Next = right after the current item. End = when the current playlist pass finishes."/>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Per-user queued limit" Width="150"/><TextBox x:Name="ReqPerUser" Width="60"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Per-user cooldown (s)" Width="150"/><TextBox x:Name="ReqCooldown" Width="60"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Max queue length" Width="150"/><TextBox x:Name="ReqMax" Width="60"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Max song length (min)" Width="150"/><TextBox x:Name="ReqMaxDur" Width="60" ToolTip="0 = no limit"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Match strictness (0-1)" Width="150"/><TextBox x:Name="ReqScore" Width="60" ToolTip="Minimum fuzzy-match score, default 0.55"/></StackPanel>
+            <CheckBox x:Name="ReqApproval" Content="Host must approve each request"/>
+            <TextBlock Text="Allowed users (blank = everyone)"/><TextBox x:Name="ReqAllowed" ToolTip="Comma separated"/>
+            <TextBlock Text="Blocked users"/><TextBox x:Name="ReqBlocked" ToolTip="Comma separated"/>
+            <CheckBox x:Name="ReqVoteSkip" Content="!skip vote skipping" Margin="6,10,0,4"/>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Votes needed" Width="150"/><TextBox x:Name="ReqVotes" Width="60"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="…or % of viewers" Width="150"/><TextBox x:Name="ReqPercent" Width="60" ToolTip="0 = use the vote count. Uses the LIVE viewer count when known."/></StackPanel>
+            <CheckBox x:Name="ReqWrong" Content="!wrongsong (requester removes/skips their own)"/>
+            <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Margin="0,8,0,0" Text="Responses show on stream (chat-response overlay). They're only posted in chat if you turned on &quot;Reply in chat&quot; in Settings → Chat commands."/>
+            <Button Content="Save request settings" Click="ReqSave_Click"/>
+          </StackPanel>
+          </ScrollViewer>
+          <TextBlock x:Name="ReqNow" DockPanel.Dock="Top" FontWeight="Bold" TextWrapping="Wrap" Text="Not streaming."/>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+            <Button Content="Approve" Click="ReqApprove_Click"/>
+            <Button Content="Deny / remove" Click="ReqRemove_Click" Style="{StaticResource Secondary}"/>
+            <Button Content="▲" Click="ReqUp_Click" Style="{StaticResource Secondary}"/>
+            <Button Content="▼" Click="ReqDown_Click" Style="{StaticResource Secondary}"/>
+            <Button Content="Clear" Click="ReqClear_Click" Style="{StaticResource Secondary}"/>
+            <Button Content="Skip current" Click="Skip_Click" Style="{StaticResource Secondary}" Margin="16,0,0,0"/>
+          </StackPanel>
+          <ListBox x:Name="ReqBox"/>
+        </DockPanel>
+      </TabItem>
+
+      <!-- VIEWERS (v2.3) -->
+      <TabItem Header="Viewers" x:Name="ViewersTab">
+        <DockPanel Margin="10">
+          <StackPanel DockPanel.Dock="Top">
+            <StackPanel Orientation="Horizontal">
+              <CheckBox x:Name="VwEnable" Content="Track viewers" Width="130"/>
+              <TextBlock Text="Source"/><ComboBox x:Name="VwSource" Width="140"><ComboBoxItem Content="Both"/><ComboBoxItem Content="LiveViewers"/><ComboBoxItem Content="RoomMembers"/></ComboBox>
+              <TextBlock Text="Leave after (s)" Margin="12,0,6,0"/><TextBox x:Name="VwGrace" Width="50"/>
+              <CheckBox x:Name="VwJoinAlert" Content="Welcome alert on stream" Margin="12,4,0,4"/>
+              <TextBox x:Name="VwJoinText" Width="200" ToolTip="{}{user} = name, {viewers} = count"/>
+              <Button Content="Save" Click="VwSave_Click" Style="{StaticResource Secondary}"/>
+            </StackPanel>
+            <TextBlock Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Names are read from the chat panel (LIVE → Viewers list, and the Room members list), so the 💬 Chat panel must be open. ⚠ The Viewers-list selectors are not verified against the live site yet. If nothing shows up, use Settings → Chat diagnostics and send the file. Long member lists are virtualized, so only the rows EpikChat has rendered are seen."/>
+            <TextBlock x:Name="VwSummary" FontWeight="Bold" Margin="0,4,0,4"/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+            <Button Content="Open profile in chat" Click="VwOpen_Click" ToolTip="Clicks the name in EpikChat's own list (no moderation actions)"/>
+            <Button Content="Reset session" Click="VwReset_Click" Style="{StaticResource Secondary}"/>
+          </StackPanel>
+          <ListBox x:Name="VwBox" FontFamily="Consolas"/>
+        </DockPanel>
       </TabItem>
 
       <!-- STATS / LOG -->

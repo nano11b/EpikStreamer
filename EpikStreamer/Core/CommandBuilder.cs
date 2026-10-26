@@ -13,7 +13,7 @@ public static class CommandBuilder
 
     /// <summary>v2.2 live features of one encoder run. ControlPort 0 = no runtime control (azmq).</summary>
     public record LiveOptions(int ControlPort = 0, int MusicPort = 0, string? MicDevice = null, bool TextOverlays = false,
-                              double MusicVolume = 0.25, double MicVolume = 1.0, double MainVolume = 1.0);
+                              double MusicVolume = 0.25, double MicVolume = 1.0, double MainVolume = 1.0, bool Card = false);
 
     /// <summary>Input args for the mic. "lavfi:&lt;graph&gt;" is a test hook; anything else is a dshow device name.</summary>
     public static List<string> MicInputArgs(string device, FfmpegCaps? caps = null)
@@ -185,7 +185,7 @@ public static class CommandBuilder
         return args;
     }
 
-    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1, FfmpegCaps? caps = null)
+    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1, FfmpegCaps? caps = null, int cardIdx = -1)
     {
         var o = p.Overlays; var f = new List<string>(); string cur = "[v0]";
         f.Add($"[0:v]setpts=PTS-STARTPTS,fps={p.Fps}[v0]");  // timestamp based: robust to partial (skipped) segments
@@ -211,6 +211,12 @@ public static class CommandBuilder
             var (x, y) = TextPos(o.ClockCorner);
             var nx = Next();
             f.Add($"{cur}drawtext@clock=fontfile={FontName}:textfile={ClockFile}:fontsize={o.ClockFontSize}:fontcolor=white:x={x}:y={y}:box=1:boxcolor=0x000000@0.5:boxborderw=6{nx}"); cur = nx;
+        }
+        if (cardIdx >= 0)
+        {   // v2.3 now-playing card: a PNG the app re-renders (transparent when hidden)
+            var (x, y) = OverlayPos(p.NowPlaying.Corner);
+            f.Add($"[{cardIdx}:v]format=rgba[npc]");
+            var nx = Next(); f.Add($"{cur}[npc]overlay@np=x={x}:y={y}:eof_action=repeat:format=auto{nx}"); cur = nx;
         }
         if (lo is { TextOverlays: true })
         {   // chat-command responses (bottom-left) and alerts (top-centre), refreshed every frame from files the app rewrites
@@ -276,7 +282,9 @@ public static class CommandBuilder
         int musicIdx = -1, micIdx = -1;
         if (lo is { MusicPort: > 0 }) { a.AddRange(MusicInputArgs(lo.MusicPort, c)); musicIdx = next++; }
         if (!string.IsNullOrWhiteSpace(lo?.MicDevice)) { a.AddRange(MicInputArgs(lo.MicDevice!, c)); micIdx = next++; }
-        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx, c), "-map", "[vout]", "-map", "[aout]" });
+        int cardIdx = -1;
+        if (lo is { Card: true }) { a.AddRange(NowPlayingCard.InputArgs()); cardIdx = next++; }
+        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx, c, cardIdx), "-map", "[vout]", "-map", "[aout]" });
         a.AddRange(VideoEncoderArgs(p, c));
         a.AddRange(new[] { "-c:a", "aac", "-b:a", p.AudioKbps + "k", "-ar", "44100", "-ac", "2" });
         if (dests.Count == 1 && !dests[0].IsRecording)

@@ -92,6 +92,7 @@ public class Profile
     }
     public OverlaySettings Overlays { get; set; } = new();
     public AudioSettings Audio { get; set; } = new();   // v2.2
+    public NowPlayingSettings NowPlaying { get; set; } = new();   // v2.3
 
     public Profile Clone(string newName)
     {
@@ -154,6 +155,9 @@ public class ProfileStore
     public List<ScheduleEntry> Schedule { get; set; } = new();
     public HotkeySettings Hotkeys { get; set; } = new();
     public ChatSettings Chat { get; set; } = new();
+    // v2.3
+    public RequestSettings Requests { get; set; } = new();
+    public ViewerSettings Viewers { get; set; } = new();
     public int ControlPort { get; set; } = 0;          // 0 = pick a free port per session
     public List<Profile> Profiles { get; set; } = new();
 
