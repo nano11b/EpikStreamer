@@ -301,6 +301,7 @@ public partial class MainWindow : Window
             if (!System.Text.RegularExpressions.Regex.IsMatch(o2.ServerUrl, "^rtmps?://", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             { Warn($"Output \"{o2.Name}\": server URL must start with rtmp:// or rtmps://"); Tabs.SelectedIndex = 2; RefreshOutputs(o2); return; }
             var k = _keys.GetValueOrDefault(o2, "").Trim();
+            if (k.Length == 0 && _store.Chat.AutoGoLive && IsEpikOutput(o2)) { dests.Add(new CommandBuilder.Destination(o2.Name, "")); destNames.Add(o2.Name); continue; }   // v2.4.1: key comes from Go live
             if (k.Length == 0 && o2.Preset != "Custom") { Warn($"Enter the stream key for \"{o2.Name}\"."); Tabs.SelectedIndex = 2; RefreshOutputs(o2); return; }
             dests.Add(new CommandBuilder.Destination(o2.Name, CommandBuilder.JoinUrl(o2.ServerUrl, k))); destNames.Add(o2.Name);
             if (k.Length > 0) secrets.Add(k);
@@ -309,6 +310,28 @@ public partial class MainWindow : Window
         if (p.Overlays.ImageEnabled && !File.Exists(p.Overlays.ImagePath)) { Warn("Overlay image not found."); Tabs.SelectedIndex = 1; return; }
         var ff = await RequireFfmpeg(); if (ff == null) return;
         Persist();
+
+        // v2.4.1: EpikChat only accepts the ingest once a live session exists (camera icon → Go live). Create it first.
+        var enabledOuts = p.Outputs.Where(x => x.Enabled).ToList();
+        var epikOuts = enabledOuts.Where(IsEpikOutput).ToList();
+        LiveSession? goLive = null; LiveSession.Result? goLiveResult = null;
+        if (_store.Chat.AutoGoLive && epikOuts.Count > 0)
+        {
+            StartBtn.IsEnabled = false;
+            try { (goLive, goLiveResult) = await EnsureEpikLiveSession(p, epikOuts, reconnect: false); }
+            finally { StartBtn.IsEnabled = true; }
+            if (_engine?.IsRunning == true) return;
+            for (int i = 0; i < enabledOuts.Count; i++)
+            {
+                if (!IsEpikOutput(enabledOuts[i])) continue;
+                var k = _keys.GetValueOrDefault(enabledOuts[i], "").Trim();
+                if (k.Length == 0) { Warn($"No stream key for \"{enabledOuts[i].Name}\": Go live on EpikChat didn't provide one. {LiveSession.Fallback}"); Tabs.SelectedIndex = 2; return; }
+                dests[i] = dests[i] with { Target = CommandBuilder.JoinUrl(enabledOuts[i].ServerUrl, k) };
+                if (!secrets.Contains(k)) secrets.Add(k);
+            }
+            if (goLiveResult?.Outcome == LiveSession.Outcome.Failed) Log("⚠ Starting the encoder anyway; it keeps retrying until EpikChat accepts the stream.");
+            GoLiveStatus(goLiveResult?.Outcome == LiveSession.Outcome.Failed ? "Starting encoder (Go live not confirmed: " + LiveSession.Fallback + ")" : "Live session ready, starting encoder…");
+        }
 
         var run = p.Clone(p.Name); // snapshot, so UI edits don't affect the running stream
         var chatCfg = _store.Chat;
@@ -326,6 +349,7 @@ public partial class MainWindow : Window
             _engine.Log += Log;
             _engine.State += st => Dispatcher.BeginInvoke(() => { StatusText.Text = st; OnEngineState(st); });
             _engine.Stats += st => Dispatcher.BeginInvoke(() => ShowStats(st));
+            if (_store.Chat.AutoGoLive && epikOuts.Count > 0) _engine.BeforeReconnect = MakeReconnectHook(run, enabledOuts);
             _engine.Finished += () => Dispatcher.BeginInvoke(OnFinished);
             _bitrates.Clear(); DrawGraph(); PreviewImg.Source = null; _lastPreviewWrite = default;
             _engine.Start();
@@ -333,6 +357,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { Warn("Could not start: " + ex.Message); _engine = null; _session = null; return; }
         StartBtn.IsEnabled = false; StopBtn.IsEnabled = true; SkipBtn.IsEnabled = true;
         StatusText.Text = "Connecting…"; Tabs.SelectedItem = StatsTab;
+        if (goLive != null && goLiveResult?.Outcome == LiveSession.Outcome.Created) _ = FinalizeGoLive(goLive);
         _previewTimer.Start();
         Notify("Stream starting", $"{run.Name}: {string.Join(", ", destNames.DefaultIfEmpty("recording only"))}");
         UpdateControls();
@@ -538,7 +563,7 @@ public partial class MainWindow : Window
         SViewers.Text = viewers?.ToString() ?? "–";
         OnViewerCount(viewers);
         SLive.Text = ChatToggle.IsChecked != true ? "–" : live ? "🔴 LIVE" : "offline";
-        Title = "EpikStreamer 2.4.0" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
+        Title = "EpikStreamer 2.4.1" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
     }
 
     // ---------- updates ----------

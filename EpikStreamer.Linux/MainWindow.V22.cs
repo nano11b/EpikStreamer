@@ -60,7 +60,7 @@ public partial class MainWindow
         var h = _store.Hotkeys; HotkeysCheck.IsChecked = h.Enabled;
         HkStart.Text = h.StartStop; HkNext.Text = h.Next; HkMusic.Text = h.MuteMusic; HkMic.Text = h.MuteMic; HkOverlays.Text = h.ToggleOverlays;
         var c = _store.Chat;
-        CmdEnableCheck.IsChecked = c.CommandsEnabled; CmdOverlayCheck.IsChecked = c.ShowOnStream; ReplyInChatCheck.IsChecked = c.ReplyInChat;
+        CmdEnableCheck.IsChecked = c.CommandsEnabled; CmdOverlayCheck.IsChecked = c.ShowOnStream; ReplyInChatCheck.IsChecked = c.ReplyInChat; AutoGoLiveCheck.IsChecked = c.AutoGoLive;
         CmdOverlaySecs.Text = c.OverlaySeconds.ToString(); CmdCooldown.Text = c.CooldownSeconds.ToString();
         SongTpl.Text = c.SongTemplate; UptimeTpl.Text = c.UptimeTemplate;
         CustomCmds.Text = string.Join(Environment.NewLine, c.Custom.Select(x => (x.Enabled ? "" : "#") + x.Trigger + " = " + x.Response));
@@ -82,7 +82,7 @@ public partial class MainWindow
         var h = _store.Hotkeys; h.Enabled = HotkeysCheck.IsChecked == true;
         h.StartStop = HkStart.Text.Trim(); h.Next = HkNext.Text.Trim(); h.MuteMusic = HkMusic.Text.Trim(); h.MuteMic = HkMic.Text.Trim(); h.ToggleOverlays = HkOverlays.Text.Trim();
         var c = _store.Chat;
-        c.CommandsEnabled = CmdEnableCheck.IsChecked == true; c.ShowOnStream = CmdOverlayCheck.IsChecked == true; c.ReplyInChat = ReplyInChatCheck.IsChecked == true;
+        c.CommandsEnabled = CmdEnableCheck.IsChecked == true; c.ShowOnStream = CmdOverlayCheck.IsChecked == true; c.ReplyInChat = ReplyInChatCheck.IsChecked == true; c.AutoGoLive = AutoGoLiveCheck.IsChecked == true;
         c.OverlaySeconds = Int(CmdOverlaySecs.Text, 8, 1, 120); c.CooldownSeconds = Int(CmdCooldown.Text, 10, 0, 3600);
         c.SongTemplate = SongTpl.Text; c.UptimeTemplate = UptimeTpl.Text;
         c.Custom = CustomCmds.Text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 1 && l.Contains('='))

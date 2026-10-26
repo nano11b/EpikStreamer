@@ -45,6 +45,11 @@ Linux notes:
   Saved to `%APPDATA%\EpikStreamer\profiles.json`. Stream keys are saved only when **Remember keys** is ticked, and then it's encrypted with Windows DPAPI (CurrentUser). Otherwise it's kept in memory for the session only.
   A v1 `settings.json` is migrated into a profile named **Default**, and v2.0 profiles (one server + key) become a single EpikChat output.
 
+## New in 2.4.1
+- **Start opens the EpikChat live session automatically.** No more clicking the camera icon first. It also runs on reconnects and scheduled starts. It's controlled by *Output → Open Go live on EpikChat automatically when starting* (on by default).
+  - If the automation can't finish, click the camera icon in the chat panel. The encoder keeps retrying.
+  - ⚠ The selectors are untested against the live site; see `CHANGELOG.md`.
+
 ## New in 2.4
 - **Linux version** (x64 + arm64) with feature parity: .deb packages and a portable tar.gz. It uses WebKitGTK sign-in/key fetch/chat, keyring-stored keys, NVENC/VA-API/QSV/x264 and apt-friendly updates. See *Install on Linux* above.
 

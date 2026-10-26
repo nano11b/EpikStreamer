@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.4.1 — 2026-10-26
+### Fixed
+- **Start now opens the EpikChat live session for you.** Before, you had to click the camera (Go live) icon in EpikChat before Start would work, because EpikChat refuses the RTMP ingest until a live session exists.
+  - On **Start**, on **auto-reconnect** and on **scheduled starts**, the app checks the chat panel. If you're not live yet, it clicks the nav camera / **Go live** button and runs the dialog: **RTMP encoder** → Continue → your profile's **Public/Private** audience → **Create live stream** → **Connect your encoder**.
+  - It reads the session's stream key with the same automation as the key fetch. It keeps the saved key if it matches; otherwise it switches the output to the new key and saves it (masked in logs).
+  - Once ffmpeg is connected, it clicks a final **Go live / Start streaming** confirm button if EpikChat shows one. It only closes the encoder dialog with a Done-type button, never Cancel.
+  - Works the same in the Windows (WebView2) and Linux (WebKitGTK) chat panels. The chat panel opens automatically if it was closed.
+- **No duplicate sessions:** nothing is clicked when the page already shows you're live, the camera is clicked at most twice per attempt, and a reconnect within 90 s of creating a session doesn't create another.
+### Added
+- Setting **Output → "Open Go live on EpikChat automatically when starting"** (default **on**), with status messages and a timeout (60 s). If it can't finish, the encoder starts anyway (it keeps retrying) and you're told: *"Click the camera icon (Go live) in the EpikChat chat panel and finish the dialog."*
+- With the setting on, an EpikChat output may start with an empty key; the key is taken from the new session.
+- Chat diagnostics include a `goLive` section: live state, how the camera button was found, and all go-live selectors (flagged `verified: false`).
+### Tests
+- New mock `epikchat-session.html`: nav as in EpikChat (compass, green camera, gift, avatar), ingest refused until a session exists, already-live / icon-only / color-only variants. Run on WebKitGTK (`--selftest-golive`) and headless Chrome (`run-session-mock.sh`). Engine reconnect hook and key replacement are covered too.
+### Unverified assumptions
+- The camera/live selectors are **untested against the real signed-in site**: we assume the camera button's accessible name is "Go live", or else that it's an icon-only nav button with a video/camera icon or green color. "Already live" is detected from an "End/Stop stream", "You're live" or "Live now" control.
+- Whether EpikChat shows a final confirm button after the encoder connects, and how the encoder dialog closes, is assumed. If neither exists, nothing is clicked.
+
 ## 2.4.0 — 2026-10-26
 ### Added
 - **Linux / Debian version** (`EpikStreamer.Linux`, Avalonia 11) for **x64 and arm64**, with the same features as the Windows app. It shares one `EpikStreamer.Core` (net8.0) with the Windows app.

@@ -60,6 +60,9 @@ public class ChatSettings
     public bool CommandsEnabled { get; set; } = true;
     /// <summary>Opt-in: type responses into EpikChat as you. OFF by default; responses otherwise only show on-stream.</summary>
     public bool ReplyInChat { get; set; }
+    /// <summary>v2.4.1: before Start / reconnect / scheduled start, open "Go live" in the chat panel if no EpikChat live session exists.</summary>
+    public bool AutoGoLive { get; set; } = true;
+    public int GoLiveTimeoutSeconds { get; set; } = 60;
     /// <summary>Your EpikChat username (messages from it are ignored). Blank = read from the page header.</summary>
     public string MyUsername { get; set; } = "";
     /// <summary>Minimum seconds between two replies typed into chat.</summary>

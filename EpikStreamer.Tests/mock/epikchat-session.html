@@ -1,0 +1,96 @@
+<!doctype html>
+<!-- v2.4.1 mock: EpikChat chat page top nav as in Sam's screenshot (logo, compass/explore, green camera "Go live", gift, avatar).
+     The RTMP ingest is REFUSED until a live session was created through camera → "What do you want to stream?" → RTMP encoder →
+     Continue → "Choose your audience" → "Create live stream" → "Connect your encoder". The encoder dialog then waits for the ingest
+     and (ASSUMPTION, unverified on the real site) offers a final "Go live" button once the encoder is connected.
+     Query options: ?live=1 (already live), ?samekey=1 (session key = the saved FAKE key), ?noaria=1 (camera button has no
+     aria-label/title, found by its video svg), ?plain=1 (no aria-label and no icon class, found by its green color).
+     Exposes window.__mockIngest(key) = what the RTMP server would answer. FAKE keys only. -->
+<html><head><meta charset="utf-8"><title>mock chat</title><style>
+body{font-family:sans-serif;background:#111827;color:#ddd;margin:0}
+header{display:flex;align-items:center;gap:18px;padding:10px 16px;background:#1f2937}
+header button{background:none;border:0;padding:6px;cursor:pointer}
+.green{color:rgb(16,185,129)} .blue{color:rgb(59,130,246)} .violet{color:rgb(167,139,250)}
+.fixed{position:fixed}.inset-0{inset:0}.z-50{z-index:50} [role=dialog]{background:#fff;color:#111;margin:40px auto;width:480px;padding:12px}
+button{padding:4px 8px;margin:2px}
+</style></head><body>
+<header id="nav">
+  <a href="/chat" aria-label="EpikChat home"><svg width="28" height="28"><rect width="28" height="28" fill="#6366f1"/></svg></a>
+  <button type="button" aria-label="Explore" class="blue"><svg class="lucide lucide-compass" width="22" height="22" stroke="currentColor" fill="none"><circle cx="11" cy="11" r="9"/></svg></button>
+  <span id="glslot"></span>
+  <button type="button" aria-label="Gifts" class="violet"><svg class="lucide lucide-gift" width="22" height="22" stroke="currentColor" fill="none"><rect x="3" y="8" width="16" height="12"/></svg></button>
+  <button type="button" aria-label="User menu"><img alt="" width="26" height="26" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></button>
+</header>
+<main><div class="chat">CLUB DRAMA — chat messages… <button type="button">LIVE</button> <button type="button">Go live tips</button> <button type="button">Stream rules</button></div></main>
+<div role="dialog" aria-hidden="true" aria-label="Emoji picker" style="position:absolute;left:-9999px;width:300px;height:200px"><button type="button">Continue</button></div>
+<script>
+const Q = new URLSearchParams(location.search);
+const later = f => setTimeout(f, 150 + Math.random() * 250);
+window.__creates = 0; window.__golive = 0; window.__session = null; window.__live = false; window.__ingest = []; window.__finalClicks = 0;
+function renderNav(){
+  const slot = document.getElementById('glslot'); slot.innerHTML = '';
+  if (window.__live) {   // live: the camera button turns into an active state and an "End stream" button appears
+    const e = document.createElement('button'); e.type = 'button'; e.textContent = 'End stream'; e.addEventListener('click', () => { window.__live = false; window.__session = null; renderNav(); });
+    slot.appendChild(e); return;
+  }
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'green'; b.id = 'camera';
+  if (!Q.has('noaria') && !Q.has('plain')) b.setAttribute('aria-label', 'Go live');
+  b.innerHTML = '<svg ' + (Q.has('plain') ? '' : 'class="lucide lucide-video" ') + 'width="24" height="24" stroke="currentColor" fill="none"><rect x="2" y="6" width="14" height="12"/><path d="m16 13 6 4V7l-6 4"/></svg>';
+  b.addEventListener('click', () => { window.__golive++; later(openDialog); });
+  slot.appendChild(b);
+}
+const SRC = [['Camera & microphone','Go live from this browser',true],['Share your screen','A tab, window, or desktop',false],['RTMP encoder','OBS and streaming software',false]];
+let portal = null;
+function opt(t1, t2, pressed){ const b = document.createElement('button'); b.type='button'; b.setAttribute('aria-pressed', String(pressed));
+  b.innerHTML = '<span class="icon" aria-hidden="true">◎</span><span>'+t1+'</span><span>'+t2+'</span>'; return b; }
+function openDialog(){
+  if (portal) return;
+  portal = document.createElement('div'); portal.className = 'fixed inset-0 z-50';
+  const d = document.createElement('div'); d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true'); d.setAttribute('aria-label','What do you want to stream?');
+  portal.appendChild(d); document.body.appendChild(portal); renderSource(d);
+}
+function renderSource(d){
+  d.innerHTML = '<h2>What do you want to stream?</h2>';
+  const g = document.createElement('div'); g.setAttribute('role','group'); g.setAttribute('aria-label','Stream source');
+  SRC.forEach(([a,b,p]) => { const o = opt(a,b,p); o.addEventListener('click', () => later(() => { g.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed','false')); o.setAttribute('aria-pressed','true'); })); g.appendChild(o); });
+  d.appendChild(g);
+  const c = document.createElement('button'); c.type='button'; c.textContent='Cancel'; c.addEventListener('click', () => { portal.remove(); portal = null; });
+  const n = document.createElement('button'); n.type='button'; n.innerHTML='Continue<svg aria-hidden="true" width="8" height="8"></svg>';
+  n.addEventListener('click', () => later(() => { window.__chosen = [...g.querySelectorAll('button')].find(x => x.getAttribute('aria-pressed') === 'true').textContent; renderAudience(d); }));
+  d.append(c, n);
+}
+function renderAudience(d){
+  d.setAttribute('aria-label','Choose your audience'); d.innerHTML = '<h2>Choose your audience</h2>';
+  const opts = [opt('Public','Anyone can watch',true), opt('Private','Request to watch',false)];
+  opts.forEach(o => { o.addEventListener('click', () => later(() => { opts.forEach(x => x.setAttribute('aria-pressed','false')); o.setAttribute('aria-pressed','true'); })); d.appendChild(o); });
+  const cr = document.createElement('button'); cr.type='button'; cr.textContent='Create live stream';
+  cr.addEventListener('click', () => { window.__audience = opts.find(x => x.getAttribute('aria-pressed') === 'true').textContent; window.__creates++;
+    window.__session = { key: Q.has('samekey') ? 'FAKE_mock_Key_12345abc' : 'FAKE_session' + window.__creates + '_Key_9z8y' }; setTimeout(renderEncoder, 700); });
+  d.appendChild(cr);
+}
+let encDlg = null;
+function renderEncoder(){
+  portal.innerHTML = '';
+  const d = encDlg = document.createElement('div'); d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true'); d.setAttribute('aria-label','Connect your encoder');
+  d.innerHTML = '<h2>Connect your encoder</h2><p class="st">Waiting for your encoder…</p>' +
+    '<label>Server URL</label><div><input readonly value="rtmp://media.epikchat.com:1935/x"></div>' +
+    '<label>Stream key</label><div><span class="key">••••••••••••</span><button type="button" id="show">Show stream key</button></div>' +
+    '<div><button type="button" id="cancel">Cancel</button><button type="button" id="final" disabled>Go live</button></div>';
+  portal.appendChild(d);
+  d.querySelector('#show').addEventListener('click', () => later(() => { d.querySelector('.key').outerHTML = '<code class="key">' + window.__session.key + '</code>'; }));
+  d.querySelector('#cancel').addEventListener('click', () => { window.__cancelled = true; portal.remove(); portal = null; window.__session = null; });
+  d.querySelector('#final').addEventListener('click', () => { window.__finalClicks++; later(() => { window.__live = true; portal.remove(); portal = null; encDlg = null; renderNav(); }); });
+}
+// what the RTMP ingest would answer for a publish with `key`
+window.__mockIngest = key => {
+  let r;
+  if (window.__live && window.__session && key === window.__session.key) r = 'accepted (live)';
+  else if (!window.__session) r = 'refused: no live session';
+  else if (key !== window.__session.key) r = 'refused: wrong key';
+  else { r = 'accepted'; if (encDlg) later(() => { encDlg.querySelector('.st').textContent = 'Encoder connected — receiving video'; encDlg.querySelector('#final').disabled = false; }); }
+  window.__ingest.push(r); return r;
+};
+if (Q.has('live')) { window.__live = true; window.__session = { key: 'FAKE_mock_Key_12345abc' }; }
+renderNav();
+</script>
+</body></html>

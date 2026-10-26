@@ -199,12 +199,31 @@ public class ChatPanel : DockPanel
         finally { _sendLock.Release(); }
     }
 
+    /// <summary>v2.4.1: a Go-live automation bound to this panel's page (UI thread only).</summary>
+    public LiveSession NewLiveSession() => new(js => IsLoaded2 ? _web.CoreWebView2.ExecuteScriptAsync(js) : Task.FromResult("null"));
+
+    /// <summary>v2.4.1: waits until the chat page has loaded and rendered (or the timeout).</summary>
+    public async Task<bool> WaitPageReady(int timeoutSec)
+    {
+        var end = DateTime.UtcNow.AddSeconds(timeoutSec);
+        while (DateTime.UtcNow < end)
+        {
+            if (IsLoaded2 && _web.Source != null && WebViewHost.IsEpikChatUrl(_web.Source.ToString()))
+            {
+                try { if (await _web.CoreWebView2.ExecuteScriptAsync("document.readyState") == "\"complete\"") { await Task.Delay(1500); return true; } } catch { }
+            }
+            await Task.Delay(500);
+        }
+        return false;
+    }
+
     /// <summary>Sanitized structure of the chat DOM + observer state (no message text, no names), for debugging selectors.</summary>
     public async Task<string?> Diagnostics()
     {
         if (!IsLoaded2) return null;
         var r = await _web.CoreWebView2.ExecuteScriptAsync("window.__epikDiag ? window.__epikDiag() : 'null'");
-        return JsonSerializer.Deserialize<string>(r);
+        string gl; try { await _web.CoreWebView2.ExecuteScriptAsync(EpikChatAutomation.HelperJs + "\n;0"); gl = await _web.CoreWebView2.ExecuteScriptAsync("window.__epik.goLiveDiag()"); } catch (Exception ex) { gl = JsonSerializer.Serialize(new { error = ex.Message }); }
+        return EpikChatAutomation.MergeGoLiveDiag(JsonSerializer.Deserialize<string>(r), gl);
     }
 
     /// <summary>Sign out: clears cookies/storage of the shared profile (works while the environment is in use).</summary>

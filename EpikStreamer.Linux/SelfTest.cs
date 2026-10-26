@@ -26,13 +26,14 @@ static class SelfTest
                 "--selftest-host" => await Host(),
                 "--selftest-keyfetch" => await KeyFetch(args[1], args.Length > 2 ? args[2] : "Public"),
                 "--selftest-chat" => await Chat(args[1], args[2]),
+                "--selftest-golive" => await GoLive(args[1]),
                 "--selftest-secret" => Secret_(),
                 _ => Usage(),
             };
         }
         finally { BrowserClient.Shutdown(); }
     }
-    static int Usage() { P("usage: --selftest-host | --selftest-keyfetch MOCKDIR AUD | --selftest-chat MOCKDIR OUT | --selftest-secret"); return 2; }
+    static int Usage() { P("usage: --selftest-host | --selftest-keyfetch MOCKDIR AUD | --selftest-chat MOCKDIR OUT | --selftest-golive MOCKDIR | --selftest-secret"); return 2; }
 
     static async Task<BrowserClient> Client()
     {
@@ -122,6 +123,66 @@ static class SelfTest
         P($"  page title {t.Length} chars, C# received {recv.Count} chat messages, {statuses.Count} statuses, {viewers.Count} viewer snapshots → {outFile}");
         await chat.SetActive(false);
         return t.Length > 0 ? 0 : 1;
+    }
+
+    /// <summary>v2.4.1: LiveSession (the Start-button "Go live" automation) through the real ChatPanel/WebKitGTK host against the
+    /// session mock, where the RTMP ingest is refused until a live session exists.</summary>
+    static async Task<int> GoLive(string mockDir)
+    {
+        int fails = 0; void Check(bool ok, string what) { P((ok ? "PASS " : "FAIL ") + what); if (!ok) fails++; }
+        var f = Tmp("session.html", File.ReadAllText(Path.Combine(mockDir, "epikchat-session.html")));
+        const string Saved = "FAKE_mock_Key_12345abc";
+        async Task<(ChatPanel chat, Func<string, string> ev)> Open(string q)
+        {
+            var chat = new ChatPanel { ChatUrl = "file://" + f + q };
+            await chat.SetActive(true);
+            var b = await Client();
+            string Ev(string js) => b.EvalAsync("chat", js).GetAwaiter().GetResult();
+            if (!await chat.WaitPageReady(20)) throw new Exception("mock page not ready");
+            return (chat, Ev);
+        }
+        LiveSession Ls(ChatPanel c) { var l = c.NewLiveSession(); l.PollMs = 250; l.Status = (s, e) => P((e ? "  ! " : "  · ") + s); return l; }
+        string Mask(string? k) => k is { Length: > 4 } ? "••••" + k[^4..] : "-";
+
+        foreach (var aud in new[] { "Public", "Private" })
+        {
+            P($"-- not live, new key, audience {aud}");
+            var (chat, Ev) = await Open("");
+            Check(Ev("__mockIngest('" + Saved + "')").Contains("refused: no live session"), "ingest refused before a live session exists");
+            var ls = Ls(chat);
+            var r = await ls.EnsureAsync(aud, Saved, 60);
+            P($"  outcome={r.Outcome} msg={r.Message} server={r.Server} key={Mask(r.Key)} changed={r.KeyChanged}");
+            Check(r.Outcome == LiveSession.Outcome.Created, "session created");
+            Check(Ev("__creates") == "1" && Ev("__golive") == "1", "camera clicked once, exactly one create");
+            Check(Ev("__chosen").Contains("RTMP encoder") && Ev("__audience").Contains(aud), "RTMP encoder source + profile audience chosen");
+            Check(r.Key == "FAKE_session1_Key_9z8y" && r.KeyChanged && r.Server == "rtmp://media.epikchat.com:1935/x", "new key read and flagged as changed");
+            Check(Ev("__mockIngest('" + Saved + "')").Contains("wrong key"), "old saved key would be refused (so replacing it matters)");
+            var fin = ls.FinalizeAsync(30);
+            await Task.Delay(1200);
+            Check(Ev("__mockIngest('" + r.Key + "')") == "\"accepted\"", "ingest accepted with the new key once the session exists");
+            var fr = await fin; P("  finalize: " + fr);
+            Check(Ev("__finalClicks") == "1" && Ev("__live") == "true" && Ev("!!window.__cancelled") == "false", "final confirm clicked once (never Cancel), page is live");
+            var r2 = await ls.EnsureAsync(aud, r.Key, 20);
+            Check(r2.Outcome == LiveSession.Outcome.AlreadyLive && Ev("__creates") == "1", "second Start: detected live, no duplicate session (" + r2.Message + ")");
+            var dg = await chat.Diagnostics() ?? "";
+            Check(dg.Contains("\"goLive\"") && dg.Contains("verified") && !dg.Contains("FAKE_"), "go-live selectors in chat diagnostics (no key)");
+            await chat.SetActive(false);
+        }
+
+        P("-- not live, session key equals saved key");
+        { var (chat, Ev) = await Open("?samekey=1"); var r = await Ls(chat).EnsureAsync("Public", Saved, 60);
+          Check(r.Outcome == LiveSession.Outcome.Created && !r.KeyChanged && r.Key == Saved, "same key → kept, KeyChanged=false"); await chat.SetActive(false); }
+        P("-- already live");
+        { var (chat, Ev) = await Open("?live=1"); var r = await Ls(chat).EnsureAsync("Public", Saved, 20);
+          Check(r.Outcome == LiveSession.Outcome.AlreadyLive && Ev("__golive") == "0" && Ev("__creates") == "0", "already live → nothing clicked (" + r.Message + ")"); await chat.SetActive(false); }
+        foreach (var q in new[] { "?noaria=1", "?plain=1" })
+        {
+            P("-- icon-only camera button " + q);
+            var (chat, Ev) = await Open(q); var r = await Ls(chat).EnsureAsync("Public", Saved, 60);
+            Check(r.Outcome == LiveSession.Outcome.Created && Ev("__creates") == "1", "camera found without aria-label " + q + " (" + r.Message + ")");
+            await chat.SetActive(false);
+        }
+        return fails;
     }
 
     static int Secret_()

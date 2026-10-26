@@ -150,11 +150,30 @@ public class ChatPanel
         finally { _sendLock.Release(); }
     }
 
+    /// <summary>v2.4.1: a Go-live automation bound to this panel's page.</summary>
+    public LiveSession NewLiveSession() => new(js => IsLoaded2 ? _b!.EvalAsync(View, js) : Task.FromResult("null"));
+
+    /// <summary>v2.4.1: waits until the chat page has loaded and rendered (or the timeout).</summary>
+    public async Task<bool> WaitPageReady(int timeoutSec)
+    {
+        var end = DateTime.UtcNow.AddSeconds(timeoutSec);
+        while (DateTime.UtcNow < end)
+        {
+            if (IsLoaded2 && WebViewHost.IsEpikChatUrl(_url))
+            {
+                try { if (await _b!.EvalAsync(View, "document.readyState", 5000) == "\"complete\"") { await Task.Delay(1500); return true; } } catch { }
+            }
+            await Task.Delay(500);
+        }
+        return false;
+    }
+
     public async Task<string?> Diagnostics()
     {
         if (!IsLoaded2) return null;
         var r = await _b!.EvalAsync(View, "window.__epikDiag ? window.__epikDiag() : 'null'");
-        return JsonSerializer.Deserialize<string>(r);
+        string gl; try { await _b.EvalAsync(View, EpikChatAutomation.HelperJs + "\n;0"); gl = await _b.EvalAsync(View, "window.__epik.goLiveDiag()"); } catch (Exception ex) { gl = JsonSerializer.Serialize(new { error = ex.Message }); }
+        return EpikChatAutomation.MergeGoLiveDiag(JsonSerializer.Deserialize<string>(r), gl);
     }
 
     public async Task<bool> ClearBrowsingData()

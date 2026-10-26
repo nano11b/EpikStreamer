@@ -259,6 +259,20 @@ public sealed class StreamEngine
     /// <summary>Test hook: kill the encoder to simulate a dropped connection.</summary>
     public void SimulateDrop() { try { _enc?.Kill(true); } catch { } }
 
+    /// <summary>v2.4.1: awaited on the engine thread before each reconnect (after the backoff). May return replacement
+    /// destination URLs (index → (url, secret)), e.g. when a new EpikChat live session issued a different key.</summary>
+    public Func<Task<IReadOnlyDictionary<int, (string Url, string Secret)>?>>? BeforeReconnect { get; set; }
+    public void ReplaceDestinations(IReadOnlyDictionary<int, (string Url, string Secret)> map)
+    {
+        lock (_lk)
+            foreach (var (i, (url, secret)) in map)
+            {
+                if (i < 0 || i >= _netDests.Count) continue;
+                if (secret.Length > 0 && !_secrets.Contains(secret)) _secrets.Add(secret);
+                _netDests[i] = _netDests[i] with { Target = url };
+                Emit($"Destination \"{_netDests[i].Name}\" now uses the new EpikChat live session's key.");
+            }
+    }
     void Emit(string s) => Log?.Invoke(CommandBuilder.Mask(s, _secrets));
 
     void PrepareOverlayFiles()
@@ -334,6 +348,17 @@ public sealed class StreamEngine
                     if (i % 10 == 0) State?.Invoke($"Reconnecting in {delay - i / 10}s (attempt {attempt}/{_p.MaxRetries})");
                     Thread.Sleep(100);
                 }
+                if (!_stop && BeforeReconnect is { } br)
+                {
+                    try
+                    {
+                        State?.Invoke("Checking the EpikChat live session…");
+                        var t = br();
+                        if (!t.Wait(TimeSpan.FromSeconds(120))) Emit("Go-live check timed out; reconnecting anyway.");
+                        else if (t.Result is { } map) ReplaceDestinations(map);
+                    }
+                    catch (Exception ex) { Emit("Go-live check failed: " + ex.GetBaseException().Message); }
+                }
             }
         }
         catch (Exception ex) { Emit("Engine error: " + ex); State?.Invoke("Error: " + ex.Message); }
@@ -366,7 +391,7 @@ public sealed class StreamEngine
     void StartEncoder()
     {
         bool hasLogo = _p.Overlays.ImageEnabled && File.Exists(_p.Overlays.ImagePath);
-        var dests = new List<CommandBuilder.Destination>(_netDests);
+        List<CommandBuilder.Destination> dests; lock (_lk) dests = new List<CommandBuilder.Destination>(_netDests);
         if (_p.RecordEnabled)
         {
             var path = CommandBuilder.RecordingPath(_p, ++_recPart, DateTime.Now);

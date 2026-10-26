@@ -38,7 +38,7 @@ public static class EpikChatAutomation
     /// <summary>Helper injected into the page: window.__epik.step(id, arg), .read(), .click(patterns), .loggedIn(), .dialog().</summary>
     public const string HelperJs = """
 (() => {
-  if (window.__epik && window.__epik.v === 3) return 'ready';
+  if (window.__epik && window.__epik.v === 4) return 'ready';
   const txt = e => (e && e.textContent || '').replace(/\s+/g, ' ').trim();
   const vis = e => { if (!e || !e.isConnected) return false; if (e.closest('[aria-hidden="true"]')) return false;
     const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
@@ -61,7 +61,7 @@ public static class EpikChatAutomation
   const dlgLabel = d => d ? (d.getAttribute('aria-label') || txt(d.querySelector('h1,h2,h3')) || '(dialog)') : '';
   const buttons = root => [...(root || document).querySelectorAll('button,[role=button]')].filter(vis);
   const last = {};
-  const GAP = { create: 15000, golive: 4000 };   // never double-create a stream on a slow page
+  const GAP = { create: 15000, golive: 4000, finalize: 8000, closeEncoder: 5000 };   // never double-create a stream on a slow page
   const throttled = id => { const now = Date.now(); if (last[id] && now - last[id] < (GAP[id] || 2500)) return true; last[id] = now; return false; };
   const RTMP = /rtmps?:\/\/[^\s"'<>]+/i;
   const stage = d => { const l = dlgLabel(d); const t = d ? txt(d) : '';
@@ -73,12 +73,49 @@ public static class EpikChatAutomation
   const res = (state, info, d) => ({ state, info: info || '', dialog: dlgLabel(d === undefined ? dialog() : d), stage: stage(d === undefined ? dialog() : d) });
   const clickOnce = (id, el, d, what) => { if (throttled(id)) return res('waiting', 'clicked ' + what + ', waiting for the page', d); press(el); return res('clicked', what, d); };
 
+  // ---- v2.4.1: the nav "Go live" (camera) button and "already live" detection. Selectors are listed in GOLIVE_SEL for diagnostics. ----
+  const nameOf = e => (e.getAttribute('aria-label') || e.getAttribute('title') || txt(e) || '').replace(/\s+/g, ' ').trim();
+  const GL_STRONG = /^(go live|go live now|start (a )?(live ?)?stream(ing)?|start broadcast(ing)?|new live stream|create (a )?live stream)$/i;  // anywhere outside dialogs
+  const GL_WEAK = /^(stream|broadcast|live ?stream|camera|video|go-live|golive)$/i;                                                          // nav only
+  const LIVE_NAME = /^((end|stop|finish)( (the|your))? ?(live ?)?(stream|broadcast|live)( now)?|(you('|’)?re|you are) live|live now|on air|manage (your )?(live ?)?stream)$/i;
+  const NAV = 'header,nav,[role=banner],[role=navigation]';
+  const inNav = e => !!e.closest(NAV) || e.getBoundingClientRect().top < 90;
+  const iconHint = e => /video|camera|webcam|broadcast|go-?live|stream/.test([...e.querySelectorAll('svg,use,i,img')].map(x =>
+      [x.getAttribute('class'), x.getAttribute('data-icon'), x.getAttribute('href'), x.getAttribute('xlink:href'), x.getAttribute('alt'), x.getAttribute('aria-label'), x.getAttribute('data-testid')].join(' ')).join(' ').toLowerCase());
+  const greenish = e => { for (const x of [e, ...e.querySelectorAll('svg,svg *,span')].slice(0, 8)) { const cs = getComputedStyle(x);
+      for (const c of [cs.color, cs.backgroundColor, cs.stroke, cs.fill]) { const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || ''); if (m) { const r = +m[1], g = +m[2], b = +m[3]; if (g > 110 && g > r + 40 && g > b + 15) return true; } } } return false; };
+  const clickables = () => [...document.querySelectorAll('button,a,[role=button]')].filter(vis).filter(b => !b.closest('[role=dialog],[role=alertdialog]'));
+  const findGoLive = () => {
+    const all = clickables();
+    const strong = all.filter(b => GL_STRONG.test(nameOf(b)) || GL_STRONG.test(accName(b)));
+    let b = strong.find(inNav) || strong[0];
+    if (b) return { el: b, how: 'name "' + nameOf(b) + '"' + (inNav(b) ? ' in nav' : '') };
+    const nav = all.filter(inNav);
+    b = nav.find(b => GL_WEAK.test(nameOf(b))); if (b) return { el: b, how: 'nav button "' + nameOf(b) + '"' };
+    const icons = nav.filter(b => txt(b).length < 3 && b.querySelector('svg,img,i'));
+    b = icons.find(iconHint); if (b) return { el: b, how: 'nav icon button (video/camera icon)' };
+    b = icons.find(greenish); if (b) return { el: b, how: 'green nav icon button' };
+    return null;
+  };
+  const liveState = () => {
+    const d = dialog(); const st = stage(d);
+    const endB = [...document.querySelectorAll('button,a,[role=button],[role=status]')].filter(vis).find(b => LIVE_NAME.test(nameOf(b)));
+    const g = findGoLive();
+    const active = g && ['aria-pressed', 'aria-current', 'data-active', 'data-live'].some(a => g.el.getAttribute(a) === 'true') || (g && g.el.getAttribute('data-state') === 'active');
+    const flag = [...document.querySelectorAll('[data-live="true"],[data-streaming="true"],[data-broadcasting="true"]')].find(vis);
+    let live = false, how = '';
+    if (endB) { live = true; how = 'button "' + nameOf(endB) + '"'; }
+    else if (active) { live = true; how = 'Go live button is active (' + g.how + ')'; }
+    else if (flag) { live = true; how = 'element ' + flag.tagName.toLowerCase() + '[data-live]'; }
+    return { live, how, session: live || st === 'encoder', stage: st, dialog: dlgLabel(d), golive: g ? g.how : '', loggedIn: !/\/login/i.test(location.pathname) && !document.querySelector('input[type=password]') };
+  };
+  const GOLIVE_SEL = { strong: GL_STRONG.source, navWeak: GL_WEAK.source, live: LIVE_NAME.source, nav: NAV, icon: 'svg/img class|data-icon|href ~ video|camera|webcam|broadcast|go-live|stream', green: 'icon-only nav button with a green color', verified: false };
+
   const steps = {
     golive() {
       const d = dialog(); if (ORDER[stage(d)] >= 1) return res('done', '', d);
-      const cands = buttons().filter(b => accName(b).toLowerCase() === 'go live');
-      const b = cands.find(b => b.closest('header')) || cands[0];
-      return b ? clickOnce('golive', b, d, '"Go live" button') : res('notfound', 'no visible <button> named "Go live"', d);
+      const g = findGoLive();
+      return g ? clickOnce('golive', g.el, d, 'Go live (' + g.how + ')') : res('notfound', 'no Go live / camera button found in the nav', d);
     },
     source() {
       const d = dialog(); const st = stage(d);
@@ -118,6 +155,25 @@ public static class EpikChatAutomation
       const b = buttons(d).find(b => txt(b).toLowerCase() === 'create live stream');
       return b ? clickOnce('create', b, d, '"Create live stream"') : res('notfound', 'no "Create live stream" button', d);
     },
+    // after "Connect your encoder": click a final "Go live"/"Start streaming" button once it is enabled (UNVERIFIED: the real
+    // dialog may not have one); report whether the page says the ingest was detected.
+    finalize() {
+      const d = dialog(); const st = stage(d); const ls = liveState();
+      if (st !== 'encoder') return res(ls.live ? 'done' : 'none', ls.live ? 'live (' + ls.how + ')' : 'no encoder dialog', d);
+      const bs = buttons(d).filter(b => !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+      const go = bs.find(b => /^(go live|go live now|start (the )?(live ?)?stream(ing)?|start broadcast(ing)?|publish( stream)?|i'?m ready)$/i.test(nameOf(b)));
+      if (go) return clickOnce('finalize', go, d, '"' + nameOf(go) + '"');
+      const t = txt(d);
+      const connected = /(encoder (is )?connected|receiving (video|your stream|data)|stream (is )?(detected|connected|received|live)|signal (detected|received)|you('|’)?re live|you are live)/i.test(t);
+      const done = bs.find(b => /^(done|finish(ed)?|got it)$/i.test(txt(b)));
+      return res(connected ? 'connected' : 'waiting', (connected ? 'ingest detected' : 'waiting for the ingest') + (done ? '; "' + txt(done) + '" available' : ''), d);
+    },
+    // close the encoder dialog only through a positive "Done"/"Finish"/"Got it" button; never Cancel / End / ×
+    closeEncoder() {
+      const d = dialog(); if (stage(d) !== 'encoder') return res('done', '', d);
+      const b = buttons(d).find(b => /^(done|finish(ed)?|got it)$/i.test(txt(b)));
+      return b ? clickOnce('closeEncoder', b, d, '"' + txt(b) + '"') : res('notfound', 'no Done button; dialog left open', d);
+    },
     showkey() {
       const r = window.__epik.read(); if (r.key) return res('done', 'key visible');
       const d = dialog();
@@ -127,7 +183,9 @@ public static class EpikChatAutomation
   };
 
   window.__epik = {
-    v: 3,
+    v: 4,
+    live() { try { return liveState(); } catch (e) { return { live: false, how: 'error ' + e, session: false, stage: '', dialog: '', golive: '', loggedIn: true }; } },
+    goLiveDiag() { const ls = this.live(); return { ...ls, selectors: GOLIVE_SEL }; },
     dialog() { const d = dialog(); return { label: dlgLabel(d), stage: stage(d) }; },
     step(id, arg) { try { return steps[id](arg); } catch (e) { return { state: 'error', info: String(e), dialog: '', stage: '' }; } },
     find(patterns) {
@@ -186,6 +244,15 @@ public static class EpikChatAutomation
     };
     /// <summary>Text fallback for live status ("You're live", "Broadcasting", "Stop broadcast"). UNTESTED.</summary>
     public const string LiveTextRegex = @"\b(you(?:'|’)?re live|you are live|broadcasting|on air|stop (?:broadcast|stream(?:ing)?)|end (?:broadcast|stream))\b";
+
+    /// <summary>v2.4.1: adds the Go-live detection result + the selectors it uses (key "goLive") to the chat diagnostics JSON.</summary>
+    public static string MergeGoLiveDiag(string? diagJson, string goLiveJson)
+    {
+        System.Text.Json.Nodes.JsonObject o;
+        try { o = System.Text.Json.Nodes.JsonNode.Parse(string.IsNullOrEmpty(diagJson) ? "{}" : diagJson) as System.Text.Json.Nodes.JsonObject ?? new(); } catch { o = new() { ["raw"] = diagJson }; }
+        try { o["goLive"] = System.Text.Json.Nodes.JsonNode.Parse(string.IsNullOrEmpty(goLiveJson) ? "null" : goLiveJson); } catch { o["goLive"] = goLiveJson; }
+        return o.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+    }
 
     /// <summary>v2.2.2: chat messages are read by Web/chat-observer.js, which matches EpikChat's real DOM
     /// (role=log "Chat messages" Virtuoso list, [data-chat-message-row] ids, [data-chat-message-layout], composer input).</summary>
@@ -251,4 +318,142 @@ img[class*='avatar' i] { width: 22px !important; height: 22px !important; }
     {
         css = CompactCss, viewerSel = ViewerCountSelectors, viewerRe = ViewerTextRegex, liveSel = LiveSelectors, liveRe = LiveTextRegex, compact
     }));
+}
+
+/// <summary>
+/// v2.4.1: makes sure an EpikChat live session exists before ffmpeg pushes to the ingest (EpikChat refuses the RTMP
+/// stream until "Go live → RTMP encoder → audience → Create live stream" was done). Host-agnostic: <paramref name="eval"/>
+/// runs JS in the signed-in chat page (WebView2 ExecuteScriptAsync / WebKitGTK eval) and returns the result as JSON.
+/// Only the site's normal buttons are clicked; no EpikChat API is called and no password is seen.
+/// </summary>
+public sealed class LiveSession
+{
+    public enum Outcome { AlreadyLive, Created, Failed }
+    public record Result(Outcome Outcome, string Message, string? Server = null, string? Key = null, bool KeyChanged = false);
+
+    readonly Func<string, Task<string>> _eval;
+    public Action<string, bool> Status { get; set; } = (_, _) => { };
+    public int PollMs { get; set; } = 500;
+    public LiveSession(Func<string, Task<string>> eval) { _eval = eval; }
+
+    public const string Fallback = "Click the camera icon (Go live) in the EpikChat chat panel and finish the dialog; the encoder keeps retrying.";
+
+    async Task<System.Text.Json.JsonElement> Js(string script)
+    {
+        var raw = await _eval(script);
+        try { return System.Text.Json.JsonDocument.Parse(string.IsNullOrEmpty(raw) ? "null" : raw).RootElement.Clone(); }
+        catch { return default; }
+    }
+    Task EnsureHelper() => Js(EpikChatAutomation.HelperJs + "\n;0");
+    static string S(System.Text.Json.JsonElement e, string k) => e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+    static bool B(System.Text.Json.JsonElement e, string k) => e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.True;
+
+    /// <summary>Current page state: { live, how, session, stage, dialog, golive, loggedIn }.</summary>
+    public async Task<(bool Live, bool Session, string How, string Stage, bool LoggedIn)> StateAsync()
+    {
+        await EnsureHelper();
+        var r = await Js("window.__epik.live()");
+        if (r.ValueKind != System.Text.Json.JsonValueKind.Object) return (false, false, "page not ready", "", true);
+        return (B(r, "live"), B(r, "session"), S(r, "how"), S(r, "stage"), !r.TryGetProperty("loggedIn", out var li) || li.ValueKind != System.Text.Json.JsonValueKind.False);
+    }
+
+    /// <summary>Detects an existing live session; otherwise runs the Go-live dialog and reads the session's key.
+    /// Never creates a second session when one is detected (live indicator or the encoder dialog already open).</summary>
+    public async Task<Result> EnsureAsync(string audience, string? savedKey, int timeoutSec, CancellationToken ct = default)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(Math.Max(10, timeoutSec));
+        try
+        {
+            var st = await StateAsync();
+            if (!st.LoggedIn) return new(Outcome.Failed, "Not signed in to EpikChat in the chat panel. " + Fallback);
+            if (st.Live) { Status("Live session ready (already live on EpikChat: " + st.How + ")", false); return new(Outcome.AlreadyLive, "already live: " + st.How); }
+            if (st.Stage != "encoder")
+            {
+                Status("Opening Go live on EpikChat…", false);
+                foreach (var s in EpikChatAutomation.Steps(audience))
+                {
+                    if (s.Id == "showkey") break;
+                    string state = "", info = ""; int clicks = 0;
+                    var end = Min(deadline, DateTime.UtcNow.AddSeconds(s.TimeoutSec));
+                    while (DateTime.UtcNow < end)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        await EnsureHelper();
+                        var r = await Js($"window.__epik.step({System.Text.Json.JsonSerializer.Serialize(s.Id)}, {System.Text.Json.JsonSerializer.Serialize(s.Arg)})");
+                        state = S(r, "state"); info = S(r, "info");
+                        if (state == "done") break;
+                        if (s.Id == "golive" && state == "clicked" && ++clicks >= 2)
+                        {   // never keep toggling the nav button: if the second click still didn't open the source dialog, stop
+                            await Task.Delay(PollMs * 4, ct);
+                            var d = await Js("window.__epik.dialog()");
+                            if (S(d, "stage") is "source" or "audience" or "encoder") continue;
+                            return new(Outcome.Failed, (S(d, "stage") == "other" ? $"The Go live button opened \"{S(d, "label")}\" instead of the stream-source dialog (maybe you're already live). " : "The Go live button didn't open the stream dialog. ") + Fallback);
+                        }
+                        if (s.Id == "golive" && state == "notfound")
+                        {   // maybe we went live meanwhile (another tab / the user clicked) → don't create a second session
+                            var again = await StateAsync();
+                            if (again.Live) { Status("Live session ready (" + again.How + ")", false); return new(Outcome.AlreadyLive, "already live: " + again.How); }
+                        }
+                        await Task.Delay(PollMs, ct);
+                    }
+                    if (state != "done")
+                        return new(Outcome.Failed, $"Go live step \"{s.Name}\" didn't complete ({state}{(info.Length > 0 ? ": " + info : "")}). " + Fallback);
+                    Status("Opening Go live on EpikChat… " + s.Name + " ✓", false);
+                }
+            }
+            // "Connect your encoder": read the session's server + key (reveal it if needed)
+            string server = "", key = "";
+            while (DateTime.UtcNow < deadline && key.Length == 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                await EnsureHelper();
+                var r = await Js("window.__epik.read()");
+                server = S(r, "server"); key = S(r, "key");
+                if (key.Length == 0) { await Js("window.__epik.step('showkey', '')"); await Task.Delay(PollMs * 2, ct); }
+            }
+            if (key.Length == 0)
+            {
+                if (!string.IsNullOrEmpty(savedKey)) { Status("Live session ready (created; couldn't read the key, using the saved one)", false); return new(Outcome.Created, "created, key not read", null, null); }
+                return new(Outcome.Failed, "Live session created but the stream key wasn't found on the page. " + Fallback);
+            }
+            if (server.Length == 0) server = EpikChatAutomation.ExpectedServer;
+            bool changed = !string.Equals(key, savedKey?.Trim(), StringComparison.Ordinal);
+            Status(changed ? "Live session ready (EpikChat issued a different stream key; using it)" : "Live session ready", false);
+            return new(Outcome.Created, changed ? "created, new key" : "created, same key", server, key, changed);
+        }
+        catch (OperationCanceledException) { return new(Outcome.Failed, "Go live cancelled."); }
+        catch (Exception ex) { return new(Outcome.Failed, "Go live automation error: " + ex.Message + ". " + Fallback); }
+    }
+
+    /// <summary>After ffmpeg started: while the encoder dialog is open, click a final "Go live"/"Start streaming" button once it
+    /// appears/enables (UNVERIFIED that EpikChat has one), then close the dialog with its own "Done" button if it has one.
+    /// Returns a short description of what happened.</summary>
+    public async Task<string> FinalizeAsync(int timeoutSec, CancellationToken ct = default)
+    {
+        var end = DateTime.UtcNow.AddSeconds(timeoutSec); string last = "";
+        try
+        {
+            while (DateTime.UtcNow < end)
+            {
+                ct.ThrowIfCancellationRequested();
+                await EnsureHelper();
+                var r = await Js("window.__epik.step('finalize', '')");
+                var state = S(r, "state"); var info = S(r, "info"); last = state + (info.Length > 0 ? " (" + info + ")" : "");
+                if (state == "done") return "live on EpikChat: " + info;
+                if (state == "none") return "no encoder dialog open";
+                if (state == "clicked") Status("Clicked " + info + " on EpikChat", false);
+                if (state == "connected")
+                {
+                    var c = await Js("window.__epik.step('closeEncoder', '')");
+                    return "ingest detected" + (S(c, "state") == "clicked" ? "; closed the encoder dialog" : "; encoder dialog left open");
+                }
+                await Task.Delay(PollMs * 2, ct);
+            }
+        }
+        catch (OperationCanceledException) { return "cancelled"; }
+        catch (Exception ex) { return "error: " + ex.Message; }
+        return "timed out waiting for EpikChat to confirm (" + last + ")";
+    }
+
+    static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
 }

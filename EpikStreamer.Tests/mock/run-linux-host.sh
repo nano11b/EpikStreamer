@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 B=${1:-../../EpikStreamer.Linux/bin/Debug/net8.0/epikstreamer}
 "$B" --selftest-host
 for aud in Public Private; do "$B" --selftest-keyfetch . $aud; done
+"$B" --selftest-golive .
 out=$(mktemp -d)
 "$B" --selftest-chat . "$out/chat.json"
 python3 - "$out/chat.json" <<'PY'

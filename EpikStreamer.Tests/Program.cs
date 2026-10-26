@@ -292,6 +292,13 @@ if (mode == "v23")
 
 if (mode == "unit")
 {
+    {   // v2.4.1
+        var m = System.Text.Json.Nodes.JsonNode.Parse(EpikStreamer.EpikChatAutomation.MergeGoLiveDiag("{\"observer\":{\"attached\":true}}", "{\"state\":{\"live\":false},\"selectors\":{\"verified\":false}}"))!;
+        Check(m["observer"]!["attached"]!.GetValue<bool>() && m["goLive"]!["selectors"]!["verified"]!.GetValue<bool>() == false, "MergeGoLiveDiag keeps diag + adds goLive");
+        Check(System.Text.Json.Nodes.JsonNode.Parse(EpikStreamer.EpikChatAutomation.MergeGoLiveDiag(null, "not json"))!["goLive"]!.GetValue<string>() == "not json", "MergeGoLiveDiag tolerates bad input");
+        Check(new ChatSettings().AutoGoLive && new ChatSettings().GoLiveTimeoutSeconds == 60, "AutoGoLive defaults ON, 60 s timeout");
+        Check(EpikStreamer.EpikChatAutomation.HelperJs.Contains("finalize") && EpikStreamer.EpikChatAutomation.HelperJs.Contains("goLiveDiag"), "helper has go-live steps");
+    }
     Check(CommandBuilder.JoinUrl("rtmp://media.epikchat.com:1935/x/", "/KEY") == "rtmp://media.epikchat.com:1935/x/KEY", "JoinUrl");
     Check(CommandBuilder.TeeEscape(@"rtmp://h/a?k=1|[2]\") == @"rtmp://h/a?k=1\|\[2\]\\", "TeeEscape");
     var masked = CommandBuilder.Mask(@"Slave '[f=flv]rtmp://h/x/SEC|RET' url rtmp://h/x/SEC\|RET", new[] { "SEC|RET" });
@@ -398,6 +405,10 @@ var destinations = new List<CommandBuilder.Destination>
 };
 if (mode == "fatal") prof.MaxRetries = 4;
 var eng = new StreamEngine(prof, FF, destinations, new[] { "SECRET|KEY" }, $"{dir}/work");
+int hookCalls = 0;
+if (mode == "drop")   // v2.4.1: reconnect hook may swap in a new EpikChat session key (index 2 = the rtmp destination)
+    eng.BeforeReconnect = async () => { hookCalls++; await Task.Delay(50);
+        return new Dictionary<int, (string, string)> { [2] = ("rtmp://127.0.0.1:1935/x/NEWSESSION_key", "NEWSESSION_key") }; };
 var logAll = new StringBuilder();
 eng.TextOverlays = mode == "audio";
 SongRequestQueue? rq = null; var reqLib = new List<LibraryItem>(); var tracks = new List<string>();
@@ -477,6 +488,11 @@ if (mode == "fatal")
 }
 Check(eng.Wait(20000), "engine stopped");
 Check(!logAll.ToString().Contains("SECRET") && !logAll.ToString().Contains("KEY"), "no stream key in logs");
+if (mode == "drop")
+{
+    Check(hookCalls >= 1, $"BeforeReconnect awaited before reconnecting ({hookCalls}x)");
+    Check(logAll.ToString().Contains("now uses the new EpikChat live session") && !logAll.ToString().Contains("NEWSESSION"), "replacement key applied and masked in logs");
+}
 Check(File.Exists(eng.PreviewPath), "preview written");
 foreach (var r in eng.Recordings) Check(File.Exists(r) && r.EndsWith(".mp4"), "recording remuxed: " + r + (File.Exists(r) ? $" ({new FileInfo(r).Length} B)" : ""));
 Console.WriteLine(fails == 0 ? "ENGINE TEST PASSED" : $"{fails} FAILED");

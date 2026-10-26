@@ -1,5 +1,5 @@
 <Window x:Class="EpikStreamer.MainWindow" xmlns="https://github.com/avaloniaui" xmlns:local="clr-namespace:EpikStreamer"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer 2.4.0" Width="1280" Height="760" MinWidth="820" MinHeight="600"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer 2.4.1" Width="1280" Height="760" MinWidth="820" MinHeight="600"
         Background="{DynamicResource Bg}" Icon="/Assets/icon.png">
   <Grid Margin="12">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -158,10 +158,13 @@
                 <TextBlock Grid.Row="2" Text="Stream key"/><TextBox x:Name="KeyBox" Grid.Row="2" Grid.Column="1" PasswordChar="•"/>
                 <TextBlock x:Name="OutHint" Grid.Row="3" Grid.Column="1" Foreground="{DynamicResource Dim}" TextWrapping="Wrap"/>
                 <CheckBox x:Name="RememberKeyCheck" Grid.Row="4" Grid.Column="1" Content="Remember keys for this profile (stored in the system keyring / Secret Service)"/>
-                <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,0">
+                <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,4,0,0"><StackPanel Orientation="Horizontal">
                   <Button Content="Sign in to EpikChat &amp; get stream key" Click="EpikSignIn_Click" Margin="0,3,0,3"/>
                   <TextBlock Text="  Audience" /><ComboBox x:Name="AudienceCombo" Width="100" MinWidth="90"><ComboBoxItem Content="Public"/><ComboBoxItem Content="Private"/></ComboBox>
                   <Button Content="Sign out" Click="EpikSignOut_Click" Classes="secondary"/>
+                </StackPanel>
+                  <CheckBox x:Name="AutoGoLiveCheck" Content="Open Go live on EpikChat automatically when starting" Click="AutoGoLive_Click"
+                            ToolTip.Tip="On Start, reconnect and scheduled starts: if EpikChat doesn't show you as live, the app clicks the camera (Go live) icon in the 💬 chat panel, picks RTMP encoder + this audience and creates the live stream before ffmpeg connects. Never creates a second stream while one is live."/>
                 </StackPanel>
               </Grid>
             </Grid>
