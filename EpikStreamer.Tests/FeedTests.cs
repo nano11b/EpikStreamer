@@ -7,7 +7,7 @@ static class FeedTests
     public static int Run()
     {
         var t0 = new DateTime(2026, 10, 27, 12, 0, 0);
-        var s = new ChatFeedSettings();
+        var s = new ChatFeedSettings { CommandRoom = "" };   // 2.7.0 "auto" mode (2.7.1 default is all rooms)
         var r = new ChatFeedRouter(s); var got = new List<ChatMessage>(); r.Message += got.Add;
         var views = new List<string>(); r.Viewers += (src, n) => views.Add(src + ":" + string.Join(",", n));
         ChatMessage M(string id, string user, string text, string room = "") => new(user, text, id, false, false, room, "");
@@ -62,6 +62,22 @@ static class FeedTests
         r2.FromTapViewers("join", new[] { "zed" }, t0); r2.FromTapViewers("join", new[] { "bob" }, t0); r2.FromTapViewers("leave", new[] { "bob" }, t0);
         Check(string.Join(",", joins) == "zed,bob" && string.Join(",", leaves) == "bob", "ViewerTracker gets join/leave from tap events (panel closed)");
         Check(r.SourceStatus(t0.AddSeconds(40)).StartsWith("Chat: live feed ✓") && new ChatFeedRouter(new()).SourceStatus(t0).Contains("DOM fallback"), "source indicator: live feed vs DOM fallback");
+
+        // v2.7.1: defaults + migration, rooms/self learned from the msgpack tap
+        Check(new ChatFeedSettings().CommandRoom == "*" && new ChatFeedSettings().AllowRoomSwitchToReply, "2.7.1 defaults: all rooms, room switching allowed");
+        var old = System.Text.Json.JsonSerializer.Deserialize<ChatFeedSettings>("{\"LiveFeed\":true,\"CommandRoom\":\"\",\"AllowRoomSwitchToReply\":false}")!;
+        Check(old.Migrate() && old.CommandRoom == "*" && old.AllowRoomSwitchToReply && !old.Migrate(), "2.7.0 settings (blank room) migrated once to all rooms");
+        var named = System.Text.Json.JsonSerializer.Deserialize<ChatFeedSettings>("{\"CommandRoom\":\"Lobby\"}")!; named.Migrate();
+        Check(named.CommandRoom == "Lobby", "an explicitly named command room is kept");
+        var r3 = new ChatFeedRouter(new ChatFeedSettings()); var got3 = new List<ChatMessage>(); r3.Message += got3.Add;
+        var br = System.Text.Json.JsonDocument.Parse("{\"type\":\"epik-tap-rooms\",\"rooms\":[{\"id\":\"5b10000000000000000000b1\",\"name\":\"The_Bar_Alc_420\"}]}").RootElement;
+        ChatFeedBridge.Handle(br, "epik-tap-rooms", r3, t0, _ => { });
+        ChatFeedBridge.Handle(System.Text.Json.JsonDocument.Parse("{\"type\":\"epik-tap-self\",\"name\":\"meowington\",\"display\":\"MeStreamer\"}").RootElement, "epik-tap-self", r3, t0, _ => { });
+        r3.SetVisibleRoom("Room B");
+        r3.FromTapMessage(M("d1", "alice", "!help"), "5b10000000000000000000b1", t0);
+        r3.FromTapMessage(M("d2", "MeStreamer", "!help"), "5b10000000000000000000b1", t0);
+        r3.FromTapMessage(M("d3", "zoe", "!help"), "5b1000000000000000000fff", t0); r3.Flush(t0.AddSeconds(3));
+        Check(got3.Count == 3 && got3[0].Room == "The_Bar_Alc_420" && got3[1].Self && got3[2].Room == "", "all rooms: room names from epik-tap-rooms, self from epik-tap-self (display name), unknown room still fires after the wait");
 
         // reply queue
         var q = new ReplyQueue(); q.Enqueue("Now playing: X", "Lobby", t0); q.Enqueue("Live for 1h", "Room B", t0);
