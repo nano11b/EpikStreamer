@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.6.0 — 2026-10-26
+### Added
+- **Radio** (new tab): background music from an internet radio station, made for the Ball Pit but it works in every mode.
+  - Paste a **.pls / .m3u / .m3u8** playlist or a direct stream URL. The MP3/AAC stream is preferred and HLS is the fallback (or the other way round with **Prefer HLS**). **Test** checks that each stream decodes and reads the now-playing info.
+  - The radio goes through the existing audio pipeline: its own **volume** (changeable live) and **mute**, optional **loudnorm** levelling, and **ducking** under the mic or video audio. It mixes with your Audio-tab music.
+  - **Resilient:** a separate relay feeds the encoder over local TCP. If the station drops, the stream keeps going with silence while the relay reconnects in the background (backoff up to 5 s, switching to the other stream URL after repeated failures). The encoder never restarts because of the radio. The log shows "📻 Radio stream dropped…" and "📻 Radio reconnected".
+  - ffmpeg's HTTP reconnect options are used when the build supports them (detected from `-h protocol=http`).
+- **AzuraCast now playing:** the API base and station shortcode are detected from the playlist URL (or set by hand), and the public now-playing API is polled about every 10 s. It feeds:
+  - the **now-playing card** (title, artist, album art, progress, up next, listeners and station name);
+  - an optional **radio card** in the Ball Pit;
+  - a preview in the Radio tab.
+- **API key** is optional and not needed for now playing or requests. If set, it's stored encrypted and sent as `X-API-Key`. It's never logged.
+- **Chat:** while the radio is on, `!song` / `!np` answer with the radio track and `!lastsong` with the previous one (new placeholders `{radio}`, `{last}`, `{station}`). `!request <song>` can send song requests to the station using the existing per-user cooldown. This is **off by default**. Note that AzuraCast limits requests per IP address, so the station may refuse requests that come in quick succession.
+- **Ball Pit beat pulse** (optional): the balls bounce to the music.
+### Tests
+- `radio`: playlist parsing (including the real station playlist), the now-playing parser, auto-detection, requests against a local mock AzuraCast, ffmpeg arguments, and the relay and silence fill.
+- `radio-encode`: end-to-end encodes on both ffmpeg builds, including a simulated 8 s station drop. The video stayed continuous, the audio came back, and the encoder never restarted.
+### Notes
+- Now playing uses polling (not SSE), and only for AzuraCast stations. Other stations play, but without track info.
+- Turning the radio on or off, or changing its URL, applies on the next Start. Volume and mute apply live.
+- The beat pulse only runs while streaming.
+
 ## 2.5.0 — 2026-10-26
 ### Added
 - **Ball Pit** (new tab): everyone in the room becomes a bouncy, avatar-textured 3D ball you can stream.
