@@ -20,6 +20,8 @@ public sealed class ChatCommands
     /// <summary>v2.5 Ball Pit hook: (user, command, argument, isHost) → handled. Runs with a per-user cooldown and never replies in chat.</summary>
     public Func<string, string, string, bool, bool>? BallPit { get; set; }
     public bool BallPitListed { get; set; } = true;
+    /// <summary>v2.8: extra triggers listed by !help (Engage commands).</summary>
+    public Func<IEnumerable<string>>? ExtraTriggers { get; set; }
     readonly Dictionary<string, DateTime> _pitLast = new(StringComparer.OrdinalIgnoreCase);
     bool TryBallPit(ChatMessage m, bool host, DateTime now)
     {
@@ -41,7 +43,7 @@ public sealed class ChatCommands
     public bool RadioListed { get; set; }
     public bool RadioRequestsListed { get; set; }
     public IEnumerable<string> Triggers => new[] { "!song", "!uptime", "!help" }
-        .Concat(RadioListed ? new[] { "!np", "!lastsong" } : Array.Empty<string>()).Concat(RadioRequestsListed ? new[] { "!request" } : Array.Empty<string>()).Concat(BallPit != null && BallPitListed ? BallPitScene.CommandNames : Array.Empty<string>()).Concat(_s.Custom.Where(c => c.Enabled).Select(c => c.Trigger.Trim().ToLowerInvariant()));
+        .Concat(RadioListed ? new[] { "!np", "!lastsong" } : Array.Empty<string>()).Concat(RadioRequestsListed ? new[] { "!request" } : Array.Empty<string>()).Concat(BallPit != null && BallPitListed ? BallPitScene.CommandNames : Array.Empty<string>()).Concat(_s.Custom.Where(c => c.Enabled).Select(c => c.Trigger.Trim().ToLowerInvariant())).Concat(ExtraTriggers?.Invoke() ?? Array.Empty<string>());
 
     /// <summary>Returns the response for a message or null (not a command, cooldown, duplicate, or our own reply).</summary>
     public string? Handle(ChatMessage m, Context ctx, DateTime now)

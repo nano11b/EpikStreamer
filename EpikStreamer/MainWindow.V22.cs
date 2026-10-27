@@ -93,7 +93,7 @@ public partial class MainWindow
         c.Milestones = MilestonesBox.Text.Split(',', ';', ' ').Select(x => int.TryParse(x.Trim(), out var v) ? v : 0).Where(v => v > 0).Distinct().OrderBy(v => v).ToList();
         RebuildChatEngines();
     }
-    void RebuildChatEngines() { _commands = new ChatCommands(_store.Chat); _alerts = new ViewerAlerts(_store.Chat); HookBallPitCommands(); }
+    void RebuildChatEngines() { _commands = new ChatCommands(_store.Chat); _alerts = new ViewerAlerts(_store.Chat); HookBallPitCommands(); _commands.ExtraTriggers = () => _engage?.Triggers() ?? Array.Empty<string>(); }
 
     void LoadAudio(Profile p)
     {
@@ -235,6 +235,7 @@ public partial class MainWindow
     {
         var c = _store.Chat;
         if (c.DebugLog) Log($"💬 [{m.Room}] {m.User}{(m.IsBot ? " (bot)" : "")}{(m.Self ? " (you)" : "")}: {m.Text}");
+        if (HandleEngage(m)) return;          // v2.8: points / rewards / games / polls (commands, votes, trivia answers)
         if (HandleRadioRequest(m)) return;   // v2.6: radio on + radio requests → AzuraCast
         if (HandleRequestCommand(m)) return;
         bool live = _engine?.IsRunning == true;

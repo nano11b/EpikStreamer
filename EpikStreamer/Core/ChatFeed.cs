@@ -52,6 +52,16 @@ public sealed class ChatFeedRouter
     public string StreamRoom { get; set; } = "";
     public string Self { get; set; } = "";
     public string SelfDisplay { get; set; } = "";
+    /// <summary>v2.8: the signed-in user's EpikChat userId (from the socket handshake) and a name → userId map learned from
+    /// chat messages and the viewers ack (Engage points are keyed by userId).</summary>
+    public string SelfId { get; set; } = "";
+    readonly Dictionary<string, string> _nameIds = new(StringComparer.OrdinalIgnoreCase);
+    public void LearnUserId(string name, string id)
+    {
+        if (string.IsNullOrWhiteSpace(name) || !System.Text.RegularExpressions.Regex.IsMatch(id ?? "", "^[A-Za-z0-9_-]{6,40}$")) return;
+        lock (_nameIds) { if (_nameIds.Count > 20000) _nameIds.Clear(); _nameIds[name.Trim()] = id!; }
+    }
+    public string UserIdOf(string name) { lock (_nameIds) return _nameIds.TryGetValue((name ?? "").Trim(), out var id) ? id : ""; }
     public string TargetRoom => S.CommandRoom is { Length: > 0 } c ? c : (StreamRoom.Length > 0 ? StreamRoom : VisibleRoom);
     public bool AllRooms => S.CommandRoom == ChatFeedSettings.AllRooms;
 
@@ -139,7 +149,7 @@ public sealed class ChatFeedRouter
             if (m.Id != null && roomId.Length > 0) { _tapRoomOfId[m.Id] = roomId; if (_tapRoomOfId.Count > 3000) _tapRoomOfId.Clear(); }
             if (roomId.Length > 0 && m.Room.Length > 0) _roomById[roomId] = m.Room;
             else if (roomId.Length > 0 && m.Id != null && _domRoomOfId.TryGetValue(m.Id, out var dn)) _roomById[roomId] = dn;
-            if (Self.Length > 0 && Eq(m.User, Self) || SelfDisplay.Length > 0 && Eq(m.User, SelfDisplay)) m = m with { Self = true };
+            if (Self.Length > 0 && Eq(m.User, Self) || SelfDisplay.Length > 0 && Eq(m.User, SelfDisplay) || SelfId.Length > 0 && m.UserId == SelfId) m = m with { Self = true };
             if (Seen(m.Id) || CrossDup(m, "tap", now)) { Duplicates++; Remember(m.Id); }
             else
             {

@@ -253,7 +253,7 @@
     const key = names.slice().sort().join('\n');
     if (key === lastViewers.key && sio.viewerAcks > 1) return;   // unchanged poll
     lastViewers.key = key;
-    post({ type: 'epik-tap-viewers', op: 'snapshot', names, via, details: vs.slice(0, 500).map(x => ({ name: x.name.slice(0, 40), picture: /^https:\/\//.test(x.picture) ? x.picture.slice(0, 300) : '', country: x.country.slice(0, 8) })) });
+    post({ type: 'epik-tap-viewers', op: 'snapshot', names, via, details: vs.slice(0, 500).map(x => ({ name: x.name.slice(0, 40), picture: /^https:\/\//.test(x.picture) ? x.picture.slice(0, 300) : '', country: x.country.slice(0, 8), id: x.id.slice(0, 40) })) });
   };
   const onChat = (p, live) => {
     if (!isObj(p) || typeof p._id !== 'string') return 'message-?';
@@ -268,7 +268,7 @@
     const self = !!sio.self.id && p.senderId === sio.self.id;
     st.msgs++;
     const t = typeof p.createdAt === 'number' ? new Date(p.createdAt).toISOString() : strOf(p.createdAt);
-    post({ type: 'epik-chat', source: 'tap', id: p._id, user: strOf(p.senderName).slice(0, 60), text: text.slice(0, 2000), time: t, room: rn, roomId: rid, isBot, self });
+    post({ type: 'epik-chat', source: 'tap', id: p._id, user: strOf(p.senderName).slice(0, 60), text: text.slice(0, 2000), time: t, room: rn, roomId: rid, isBot, self, userId: strOf(p.senderId).slice(0, 40) });
     return isBot ? 'message(bot)' : (self ? 'message(self)' : 'message');
   };
   const sioPacket = (pkt, dir) => {
@@ -293,7 +293,7 @@
         const u = isObj(p) && isObj(p.userData) ? p.userData : {};
         sio.self = { id: strOf(u.userId), name: strOf(u.username), display: strOf(u.displayName) };
         for (const b of [u.chatCommandsBotId, ...(Array.isArray(u.mutedBotIds) ? u.mutedBotIds : [])]) if (typeof b === 'string') sio.botIds.add(b);
-        post({ type: 'epik-tap-self', name: sio.self.name.slice(0, 60), display: sio.self.display.slice(0, 60) });
+        post({ type: 'epik-tap-self', name: sio.self.name.slice(0, 60), display: sio.self.display.slice(0, 60), id: sio.self.id.slice(0, 40) });
         learnRooms(u.favorites ? { favorites: u.favorites } : p); kind = 'session';
       }
       else if (ev === 'userUpdate') kind = 'presence';

@@ -26,7 +26,8 @@ public static class ChatFeedBridge
             {
                 var text = Str(r, "text"); if (text.Length == 0) return true;
                 var id = Str(r, "id", 120);
-                var m = new ChatMessage(Str(r, "user", 60), text, id.Length > 0 ? id : null, Bool(r, "isBot"), Bool(r, "self"), Str(r, "room", 100), Str(r, "time", 40));
+                var m = new ChatMessage(Str(r, "user", 60), text, id.Length > 0 ? id : null, Bool(r, "isBot"), Bool(r, "self"), Str(r, "room", 100), Str(r, "time", 40), Str(r, "userId", 40));
+                if (m.UserId.Length > 0) router.LearnUserId(m.User, m.UserId);
                 if (Str(r, "source", 10) == "tap") { if (router.S.LiveFeed) router.FromTapMessage(m, Str(r, "roomId", 100), now); }
                 else router.FromDomMessage(m, now);
                 return true;
@@ -47,6 +48,8 @@ public static class ChatFeedBridge
                 if (!router.S.LiveFeed) return true;
                 var op = Str(r, "op", 10); if (op is not ("join" or "leave" or "snapshot")) return true;
                 if (Str(r, "via", 10) == "rest" && !router.S.ViewersRestFallback) return true;
+                if (r.TryGetProperty("details", out var det) && det.ValueKind == JsonValueKind.Array)
+                    foreach (var d in det.EnumerateArray().Take(2000)) if (d.ValueKind == JsonValueKind.Object) router.LearnUserId(Str(d, "name", 60), Str(d, "id", 40));
                 router.FromTapViewers(op, Names(r), now);
                 return true;
             }
@@ -67,6 +70,7 @@ public static class ChatFeedBridge
             {
                 var n = Str(r, "name", 60); var d = Str(r, "display", 60);
                 if (n.Length > 0) { router.Self = n; router.SelfDisplay = d; }
+                var sid = Str(r, "id", 40); if (sid.Length > 0) { router.SelfId = sid; router.LearnUserId(n, sid); }
                 return true;
             }
             case "epik-tap-members": case "epik-tap-stats":

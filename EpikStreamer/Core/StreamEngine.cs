@@ -265,6 +265,9 @@ public sealed class StreamEngine
 
     /// <summary>Shows an alert banner on stream for <paramref name="seconds"/> (drawtext reload=1 picks it up next frame).</summary>
     public void ShowAlert(string text, double seconds) => ShowText(CommandBuilder.AlertFile, text, seconds, ref _alertTimer);
+    /// <summary>v2.8: Engage cards as text for the drawtext overlay (only used when the Ball Pit isn't drawing them).</summary>
+    public void SetEngageText(string text) { if (!IsRunning || !TextOverlays || PitActive || text == _engageText) return; _engageText = text; WriteOverlay(CommandBuilder.EngageFile, text); }
+    string _engageText = "";
     public void ShowChatResponse(string text, double seconds) => ShowText(CommandBuilder.ChatFile, text, seconds, ref _chatTimer);
     void ShowText(string file, string text, double seconds, ref System.Threading.Timer? timer)
     {
@@ -371,6 +374,7 @@ public sealed class StreamEngine
         File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.TextFile), o.Text ?? "", utf8);
         File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.AlertFile), "", utf8);
         File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.ChatFile), "", utf8);
+        File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.EngageFile), "", utf8); _engageText = "";
         var fmt = string.IsNullOrWhiteSpace(o.ClockFormat) ? "" : ":" + o.ClockFormat;
         File.WriteAllText(Path.Combine(WorkDir, CommandBuilder.ClockFile), "%{localtime" + fmt + "}", utf8);
         try { File.Delete(PreviewPath); } catch { }

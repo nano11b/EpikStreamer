@@ -672,6 +672,11 @@
         </ScrollViewer>
       </TabItem>
 
+      <!-- ENGAGE (v2.8): points, rewards, mini-games, polls & predictions; built in code (MainWindow.V28.cs) -->
+      <TabItem Header="Engage" x:Name="EngageTab">
+        <ContentControl x:Name="EngageHost"/>
+      </TabItem>
+
       <TabItem Header="Stats / Log" x:Name="StatsTab">
         <Grid Margin="10">
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>

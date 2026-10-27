@@ -9,7 +9,7 @@ public static class CommandBuilder
 {
     static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     public const string FontName = "font.ttf", TextFile = "overlay_text.txt", ClockFile = "clock.txt", PreviewFile = "preview.jpg";
-    public const string AlertFile = "alert.txt", ChatFile = "chat_overlay.txt";
+    public const string AlertFile = "alert.txt", ChatFile = "chat_overlay.txt", EngageFile = "engage.txt";
 
     /// <summary>v2.2 live features of one encoder run. ControlPort 0 = no runtime control (azmq).</summary>
     public record LiveOptions(int ControlPort = 0, int MusicPort = 0, string? MicDevice = null, bool TextOverlays = false,
@@ -281,6 +281,16 @@ public static class CommandBuilder
             f.Add($"{cur}drawtext@chat=fontfile={FontName}:textfile={ChatFile}:reload=1:expansion=none:fontsize={Math.Max(16, p.Height / 30)}:fontcolor=white:x=24:y=h-th-24:box=1:boxcolor=0x000000@0.6:boxborderw=10{nx}"); cur = nx;
             nx = Next();
             f.Add($"{cur}drawtext@alert=fontfile={FontName}:textfile={AlertFile}:reload=1:expansion=none:fontsize={Math.Max(20, p.Height / 16)}:fontcolor=yellow:x=(w-tw)/2:y=h/8:borderw=3:bordercolor=0x000000:box=1:boxcolor=0x4B0082@0.7:boxborderw=16{nx}"); cur = nx;
+            if (pitIdx < 0 && p.Engage is { Enabled: true, Overlay.Enabled: true })
+            {   // v2.8 Engage cards as text (poll bars, leaderboard, games); with the Ball Pit they're drawn into its frames instead
+                var (ex, ey) = p.Engage.Overlay.Corner switch
+                {
+                    Corner.TopLeft => ("24", "24"), Corner.TopCenter => ("(w-tw)/2", "24"), Corner.Center => ("(w-tw)/2", "(h-th)/2"),
+                    Corner.BottomLeft => ("24", "h-th-24"), Corner.BottomCenter => ("(w-tw)/2", "h-th-24"), Corner.BottomRight => ("w-tw-24", "h-th-24"), _ => ("w-tw-24", "24"),
+                };
+                nx = Next();
+                f.Add($"{cur}drawtext@engage=fontfile={FontName}:textfile={EngageFile}:reload=1:expansion=none:fontsize={Math.Max(14, p.Height / 40)}:fontcolor=white:line_spacing=4:x={ex}:y={ey}:box=1:boxcolor=0x101018@0.8:boxborderw=12{nx}"); cur = nx;
+            }
         }
         f.Add($"{cur}split=2[vs][pvs]");
         f.Add($"[vs]{EncoderFormat(p.Encoder)}[vout]");

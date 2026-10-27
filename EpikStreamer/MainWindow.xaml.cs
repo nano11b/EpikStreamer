@@ -62,6 +62,7 @@ public partial class MainWindow : Window
 
     void LoadProfile(Profile p)
     {
+        if (_engage != null && !ReferenceEquals(_engage.S, p.Engage)) RebuildEngageUiForProfile();
         _loading = true;
         p.EnsureOutputs();
         RememberKeyCheck.IsChecked = p.RememberKey;
@@ -342,7 +343,7 @@ public partial class MainWindow : Window
             _engine = new StreamEngine(run, ff, dests, secrets);
             HookEngine23(_engine); HookEngine26(_engine, run, radioUrls);
             _engine.BallPit = run.BallPit.Active ? _pit?.Scene : null; _bpSeq = -1;
-            _engine.TextOverlays = (chatCfg.CommandsEnabled && chatCfg.ShowOnStream) || chatCfg.AlertsEnabled;
+            _engine.TextOverlays = (chatCfg.CommandsEnabled && chatCfg.ShowOnStream) || chatCfg.AlertsEnabled || (run.Engage.Enabled && run.Engage.Overlay.Enabled);
             _engine.SetMusicMuted(_musicMuted); _engine.SetMicMuted(_micMuted); _engine.SetOverlaysHidden(_overlaysHidden);
             BeginSession(run, destNames);
             _destStatus.Clear(); for (int i = 0; i < destNames.Count; i++) _destStatus[i] = (destNames[i], DestState.Connecting, "");
