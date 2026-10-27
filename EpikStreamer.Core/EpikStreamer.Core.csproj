@@ -9,7 +9,7 @@
   <ItemGroup>
     <Compile Include="../EpikStreamer/Core/*.cs" Link="Core/%(Filename)%(Extension)" />
     <Compile Include="../EpikStreamer/EpikChatAutomation.cs" Link="EpikChatAutomation.cs" />
-    <EmbeddedResource Include="../EpikStreamer/Web/chat-observer.js" LogicalName="EpikStreamer.Web.chat-observer.js" />
+    <EmbeddedResource Include="../EpikStreamer/Web/chat-observer.js" LogicalName="EpikStreamer.Web.chat-observer.js" /><EmbeddedResource Include="../EpikStreamer/Web/chat-tap.js" LogicalName="EpikStreamer.Web.chat-tap.js" />
   </ItemGroup>
   <ItemGroup><PackageReference Include="NetMQ" Version="4.0.4.5" /><PackageReference Include="SkiaSharp" Version="2.88.9" /><PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.9" /><PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" /></ItemGroup>
 </Project>

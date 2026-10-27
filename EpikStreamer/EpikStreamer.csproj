@@ -26,7 +26,7 @@
     <PackageReference Include="NetMQ" Version="4.0.4.5" /><PackageReference Include="SkiaSharp" Version="2.88.9" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
-  <ItemGroup><Resource Include="app.ico" /><EmbeddedResource Include="Web\chat-observer.js" LogicalName="EpikStreamer.Web.chat-observer.js" /></ItemGroup>
+  <ItemGroup><Resource Include="app.ico" /><EmbeddedResource Include="Web\chat-observer.js" LogicalName="EpikStreamer.Web.chat-observer.js" /><EmbeddedResource Include="Web\chat-tap.js" LogicalName="EpikStreamer.Web.chat-tap.js" /></ItemGroup>
   <!-- If an ffmpeg\ folder exists next to the project, ship it next to the exe. -->
   <ItemGroup Condition="Exists('ffmpeg\ffmpeg.exe')">
     <None Include="ffmpeg\*.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />

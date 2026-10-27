@@ -233,7 +233,7 @@ public partial class MainWindow
     // ---------- chat commands + alerts ----------
     string? HandleChatCommand(ChatMessage m, ChatCommands.Context ctx) => _commands.Handle(m, ctx, DateTime.Now);
 
-    void ApplyChatPanelConfig() { var c = _store.Chat; _chat.SelfName = c.MyUsername; _chat.DebugMessages = c.DebugLog; _chat.ReplyMinIntervalSeconds = c.ReplyMinIntervalSeconds; }
+    void ApplyChatPanelConfig() { var c = _store.Chat; _chat.SelfName = c.MyUsername; _chat.DebugMessages = c.DebugLog; _chat.ReplyMinIntervalSeconds = c.ReplyMinIntervalSeconds; _chat.Feed.S = c.Feed; }
 
     void OnChatMessage(ChatMessage m)
     {
@@ -249,10 +249,10 @@ public partial class MainWindow
         Log($"💬 {m.User}: {m.Text} → {resp}");
         bool shown = false;
         if (c.ShowOnStream && live) { _engine!.ShowChatResponse(resp, c.OverlaySeconds); shown = true; }
-        if (c.ReplyInChat) { _ = ReplyAsync(resp); shown = true; }
+        if (c.ReplyInChat) { _ = ReplyAsync(resp, m.Room); shown = true; }
         if (!shown) Log("   (not streaming, so the response isn't shown anywhere; turn on \"reply in chat\" to answer while offline)");
     }
-    async Task ReplyAsync(string text) { var r = await _chat.SendChat(text); Log(r.StartsWith("sent") ? "💬 replied in chat " + r[4..].Trim() : "⚠ chat reply " + r); }
+    async Task ReplyAsync(string text, string room = "") { var r = await _chat.SendChat(text, room); Log(r.StartsWith("sent") ? "💬 replied in chat " + r[4..].Trim() : "⚠ chat reply " + r); }
 
     async void ChatDiag_Click(object? s, RoutedEventArgs e)
     {

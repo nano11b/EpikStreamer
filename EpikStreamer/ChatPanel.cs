@@ -21,6 +21,64 @@ public class ChatPanel : DockPanel
     public bool DebugMessages { get; set; }
     public string SelfName { get; set; } = "";
     public int ReplyMinIntervalSeconds { get; set; } = 5;
+
+    // ---- v2.7 chat feed: DOM observer + passive network tap, merged by the router ----
+    public Core.ChatFeedRouter Feed { get; } = new(new());
+    readonly Core.ReplyQueue _replies = new();
+    System.Threading.Timer? _feedTimer;
+    void InitFeed()
+    {
+        Feed.Message += m => MessageReceived?.Invoke(m);
+        Feed.Viewers += (s, n) => ViewersReceived?.Invoke(s, n);
+        _feedTimer = new(_ => { try { Feed.Flush(DateTime.Now); } catch { } }, null, 1000, 1000);
+    }
+    void OnFeedStatus(string t)
+    {
+        ObserverStatus?.Invoke(t);
+        if (!t.StartsWith("attached to ")) return;
+        var ready = _replies.TakeFor(Feed.VisibleRoom, DateTime.Now);
+        if (ready.Count > 0) _ = Task.Run(async () => { foreach (var x in ready) { var r = await SendChatNow(x); ObserverStatus?.Invoke("queued reply " + r); } });
+    }
+    public int QueuedReplies => _replies.Count;
+    /// <summary>Opt-in replies go to the command room (or the room the command came from in all-rooms mode). If that room isn't
+    /// the one visible in the panel, the reply is queued until it is — or, with "allow switching room to reply", EpikChat briefly
+    /// switches to it (clicks the room in its own room list) and back.</summary>
+    public async Task<string> SendChat(string text, string room = "")
+    {
+        var target = room.Length > 0 ? room : Feed.TargetRoom;
+        var vis = Feed.VisibleRoom;
+        if (target.Length == 0 || vis.Length == 0 || string.Equals(target.Trim(), vis.Trim(), StringComparison.OrdinalIgnoreCase)) return await SendChatNow(text);
+        if (Feed.S.AllowRoomSwitchToReply && IsLoaded2)
+        {
+            if (await SwitchRoom(target))
+            {
+                var r = await SendChatNow(text);
+                await Task.Delay(800); await SwitchRoom(vis);
+                return r + $" (switched to {target} briefly)";
+            }
+        }
+        _replies.Enqueue(text, target, DateTime.Now);
+        return $"queued: waiting until {target} is visible in the chat panel" + (Feed.S.AllowRoomSwitchToReply ? " (switching failed)" : "");
+    }
+    async Task<bool> SwitchRoom(string name)
+    {
+        try
+        {
+            var r = JsonSerializer.Deserialize<string>(await EvalJs("window.__epikSwitchRoom ? window.__epikSwitchRoom(" + JsonSerializer.Serialize(name) + ") : 'no-helper'"));
+            if (r != "clicked") return false;
+            for (int i = 0; i < 25; i++) { await Task.Delay(200); if (string.Equals(Feed.VisibleRoom.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase)) { await Task.Delay(500); return true; } }
+        }
+        catch { }
+        return false;
+    }
+    /// <summary>Sanitized tap diagnostics: event names + field names/types only (no text, names, tokens or cookies).</summary>
+    public async Task<string?> TapDiagnostics()
+    {
+        if (!IsLoaded2) return null;
+        try { return await EvalJs("window.__epikTapDiag ? JSON.stringify(window.__epikTapDiag()) : 'null'"); } catch { return null; }
+    }
+    Task<string> EvalJs(string js) => _web.CoreWebView2.ExecuteScriptAsync(js);
+    string? _tapScriptId;
     string? _chatScriptId; DateTime _lastSend = DateTime.MinValue; readonly SemaphoreSlim _sendLock = new(1, 1);
     public bool IsLoaded2 => _initialized && _wantVisible && !WebViewHost.IsSignInOpen;
     readonly WebView2 _web = new();
@@ -46,6 +104,7 @@ public class ChatPanel : DockPanel
         DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(_note, Dock.Top);
         Children.Add(bar); Children.Add(_note); Children.Add(_web);
         WebViewHost.SignInActive += OnSignIn;
+        InitFeed();
     }
 
     /// <summary>Show/hide. Hiding navigates to about:blank so the chat session is actually closed, not just invisible.</summary>
@@ -81,7 +140,11 @@ public class ChatPanel : DockPanel
     async Task RegisterScript()
     {
         var core = _web.CoreWebView2;
-        if (_scriptId != null) core.RemoveScriptToExecuteOnDocumentCreated(_scriptId);
+        // the tap must be registered first so it wraps WebSocket before EpikChat's own code runs
+        if (_tapScriptId != null) core.RemoveScriptToExecuteOnDocumentCreated(_tapScriptId);
+        if (_scriptId != null) { core.RemoveScriptToExecuteOnDocumentCreated(_scriptId); _scriptId = null; }
+        if (_chatScriptId != null) { core.RemoveScriptToExecuteOnDocumentCreated(_chatScriptId); _chatScriptId = null; }
+        _tapScriptId = Feed.S.LiveFeed ? await core.AddScriptToExecuteOnDocumentCreatedAsync(EpikChatAutomation.ChatTapJs(Feed.S)) : null;
         _scriptId = await core.AddScriptToExecuteOnDocumentCreatedAsync(EpikChatAutomation.ObserverJs(Compact));
         if (_chatScriptId != null) core.RemoveScriptToExecuteOnDocumentCreated(_chatScriptId);
         _chatScriptId = await core.AddScriptToExecuteOnDocumentCreatedAsync(EpikChatAutomation.ChatObserverJs(DebugMessages, SelfName));
@@ -102,6 +165,7 @@ public class ChatPanel : DockPanel
             using var d = JsonDocument.Parse(e.WebMessageAsJson);
             var r = d.RootElement;
             var type = r.GetProperty("type").GetString();
+            if (Core.ChatFeedBridge.Handle(r, type ?? "", Feed, DateTime.Now, OnFeedStatus)) return;
             string Str(string k) => r.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.String ? x.GetString() ?? "" : "";
             bool Bool(string k) => r.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.True;
             if (type == "epik-chat")
@@ -183,7 +247,7 @@ public class ChatPanel : DockPanel
         catch (Exception ex) { return "error: " + ex.Message; }
     }
 
-    public async Task<string> SendChat(string text)
+    public async Task<string> SendChatNow(string text)
     {
         if (!IsLoaded2) return "chat not open";
         text = text.Replace('\n', ' ').Trim(); if (text.Length > 250) text = text[..250];

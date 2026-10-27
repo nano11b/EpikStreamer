@@ -264,6 +264,18 @@ public static class EpikChatAutomation
         return "window.__EPIK_CFG = " + cfg + ";\n" + rd.ReadToEnd();
     }
 
+    /// <summary>v2.7: the passive network tap (Web/chat-tap.js), registered BEFORE the page's own scripts run. Config: REST viewers
+    /// fallback on/off + interval, and an optional protocol map override (validated JSON object, else ignored).</summary>
+    public static string ChatTapJs(Core.ChatFeedSettings s)
+    {
+        using var st = typeof(EpikChatAutomation).Assembly.GetManifestResourceStream("EpikStreamer.Web.chat-tap.js")!;
+        using var rd = new System.IO.StreamReader(st);
+        System.Text.Json.Nodes.JsonNode? map = null;
+        try { if (!string.IsNullOrWhiteSpace(s.ProtocolMapJson)) map = System.Text.Json.Nodes.JsonNode.Parse(s.ProtocolMapJson) as System.Text.Json.Nodes.JsonObject; } catch { map = null; }
+        var cfg = new System.Text.Json.Nodes.JsonObject { ["restPoll"] = s.ViewersRestFallback, ["restPollSeconds"] = Math.Max(15, s.ViewersRestSeconds), ["map"] = map ?? new System.Text.Json.Nodes.JsonObject() };
+        return "window.__EPIK_TAP_CFG = " + cfg.ToJsonString() + ";\n" + rd.ReadToEnd();
+    }
+
     /// <summary>Compact mode: hide site chrome (header/nav/footer/ads) and tighten spacing so chat fits a narrow panel. UNTESTED.</summary>
     public const string CompactCss = """
 header, nav, footer, .navbar, .site-header, .site-footer, [class*='advert' i], [id*='advert' i], [class*='banner' i], [class*='cookie' i] { display: none !important; }

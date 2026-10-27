@@ -356,6 +356,7 @@ public partial class MainWindow : Window
             _engine.Finished += () => Dispatcher.BeginInvoke(OnFinished);
             _bitrates.Clear(); DrawGraph(); PreviewImg.Source = null; _lastPreviewWrite = default;
             _engine.Start();
+            _chat.Feed.MarkStreamStart(); Log("💬 " + _chat.Feed.SourceStatus(DateTime.Now));
         }
         catch (Exception ex) { Warn("Could not start: " + ex.Message); _engine = null; _session = null; return; }
         StartBtn.IsEnabled = false; StopBtn.IsEnabled = true; SkipBtn.IsEnabled = true;
@@ -377,6 +378,7 @@ public partial class MainWindow : Window
 
     void OnFinished()
     {
+        _chat.Feed.MarkStreamStop();
         if (_engine?.Recordings.Count > 0) Log("Recordings: " + string.Join(", ", _engine.Recordings));
         if (_destStatus.ContainsKey(-1)) { _destStatus[-1] = ("Recording", DestState.Stopped, ""); RenderDests(); }
         _previewTimer.Stop();

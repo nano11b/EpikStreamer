@@ -1,4 +1,4 @@
-// EpikStreamer chat observer (v2.3.0). Injected into EpikChat's normal /chat page in the app's WebView2 panel.
+// EpikStreamer chat observer (v2.7.0). Injected into EpikChat's normal /chat page in the app's WebView2 panel.
 // Only READS the page DOM (and, when the user enabled "Reply in chat", types into the normal composer).
 // Matches EpikChat's real markup (verified 2026-10-25, Lobby, signed in):
 //   list   div[role=log][aria-label="Chat messages"] (react-virtuoso, ~44 rows rendered, rows churn)
@@ -216,6 +216,21 @@
       if (t === want || al === 'open ' + want || al === want + "'s profile") { b.scrollIntoView({ block: 'center' }); b.click(); return 'opened'; }
     }
     return 'not found (scroll the member list so the name is visible)';
+  };
+
+  // v2.7 opt-in ("allow switching room to reply"): open a room by clicking its entry in EpikChat's own room list, like a user would.
+  // ⚠ NOT VERIFIED against the live site: any visible link/button/tab/list item (outside the chat log and member lists) whose
+  // text is exactly the room name.
+  window.__epikSwitchRoom = name => {
+    const want = String(name || '').trim().toLowerCase(); if (!want) return 'no name';
+    if ((st.room || '').trim().toLowerCase() === want) return 'clicked';
+    const log = findLog();
+    const cands = [...document.querySelectorAll('a, button, [role="link"], [role="tab"], [role="treeitem"], [role="option"], [role="menuitem"], [role="listitem"]')]
+      .filter(e => shown(e) && !(log && log.contains(e)) && !e.closest(S.members) && !e.closest('[role="dialog"]'));
+    const lbl = e => ((e.getAttribute('aria-label') || '').trim() || (e.textContent || '').replace(/\s+/g, ' ').trim()).toLowerCase();
+    const hit = cands.find(e => lbl(e) === want) || cands.find(e => lbl(e).replace(/^#\s*/, '').replace(/\s*\d+$/, '') === want);
+    if (!hit) return 'room not found in the room list';
+    hit.click(); setTimeout(schedule, 300); return 'clicked';
   };
 
   // ---- v2.5 Ball Pit: full member roster (read-only; scrolls the virtualized list, then puts it back) ----
