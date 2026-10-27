@@ -194,6 +194,11 @@ public partial class MainWindow
         gm.Children.Add(Row(Btn("Start trivia now", () => Deliver(_engage!.StartTrivia(_chat.Feed.TargetRoom, DateTime.Now))),
             Btn("Reload trivia pack", () => _engage!.ReloadTrivia()),
             Btn("Start Ball Pit race", () => Deliver(_engage!.StartRace(_chat.Feed.TargetRoom, DateTime.Now)))));
+        var packs = new TextBox { Width = 520, Text = string.Join("; ", s.Games.TriviaPacks) };
+        packs.TextChanged += (_, _) => { s.Games.TriviaPacks = (packs.Text ?? "").Split(';').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(); _engage?.ReloadTrivia(); Persist(); };
+        gm.Children.Add(Row(new TextBlock { Text = "Trivia packs (JSON files, ; separated)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) }, packs,
+            Btn("Add…", () => { var d = new OpenFileDialog { Filter = "JSON|*.json" }; if (d.ShowDialog(this) == true) packs.Text = string.Join("; ", s.Games.TriviaPacks.Append(d.FileName)); })));
+        gm.Children.Add(Note("Pack format: [{\"q\": \"Question?\", \"a\": [\"answer\", \"alt answer\"], \"category\": \"music\"}] (or {\"questions\": [...]})."));
         gm.Children.Add(_gameStatus);
         gm.Children.Add(H("On-stream overlay"));
         gm.Children.Add(PropEditor(s.Overlay));

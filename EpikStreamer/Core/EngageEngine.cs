@@ -116,7 +116,7 @@ public sealed class EngageEngine
         yield return "!points"; yield return "!top"; if (S.GiveEnabled) yield return "!give";
         if (S.Rewards.Any(r => r.Enabled)) { yield return "!rewards"; yield return "!redeem"; }
         var g = S.Games; if (g.GambleEnabled) yield return "!gamble"; if (g.SlotsEnabled) yield return "!slots"; if (g.DuelEnabled) yield return "!duel"; if (g.HeistEnabled) yield return "!heist";
-        if (g.RaceEnabled) yield return "!bet";
+        if (g.RaceEnabled) { yield return "!joinrace"; yield return "!bet"; }
         if (S.Polls.Enabled) yield return "!vote"; if (S.Polls.PredictionsEnabled) yield return "!predict";
     }
 

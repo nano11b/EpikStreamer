@@ -127,9 +127,11 @@ public sealed unsafe class BallPitRenderer : IDisposable
             Overlays(order, s, t);
             if (s.ShowCount) Hud(sc.Balls.Count(b => !b.Leaving), sc.Waiting);
             if (sc.RadioCard is { } rc) RadioCard(rc);
-            sc.Overlay?.Invoke(_c, Width, Height);   // v2.8 Engage cards (poll, leaderboard, race, toasts)
-            _c.Flush();
         }
+        // v2.8 Engage cards (poll, leaderboard, race, toasts). Drawn OUTSIDE sc.Sync: the overlay takes the Engage lock, and the
+        // Engage engine calls into the scene (StartRace) while holding it — drawing under both locks deadlocked (lock-order inversion).
+        sc.Overlay?.Invoke(_c, Width, Height);
+        _c.Flush();
     }
 
     void Room(BallPitSettings s)

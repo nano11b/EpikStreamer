@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.8.0 — 2026-10-27
+### Added — Engage: viewer points, rewards, mini-games, polls & predictions
+- **Points** (name configurable, default "Epik Points"; everything per profile on the new **Engage** tab):
+  - earned per minute watching while you're live (from the live-viewers list), per chat message (cooldown, no repeated text, per-minute cap), a first-chatter bonus each stream and optional daily streaks (+25 × days, max 7);
+  - stored per EpikChat **userId** (falls back to the name; a name entry is migrated to the id once it's seen) in `engage/points.json` next to the profiles, written atomically with daily backups (14 kept); a corrupt file is moved aside and the newest backup restored;
+  - `!points [@user]`, `!top`, `!give @user N` (toggle), host/mod `!addpoints` / `!removepoints @user N`;
+  - **Points** sub-tab: search, set balance, remove, reset all, CSV export (formula-safe) / import (replace or add).
+- **Rewards** (`!rewards`, `!redeem <name> [text]`): each has a cost, cooldown, enabled flag and optional host approval (**Pending approvals** list; deny refunds). Kinds: **Song** (the viewer's text goes through your existing request queue / radio requests; refunded if requests are off), **BallPit** (`bigball`, `shake`; refunded if the pit is off), **Alert** (on-stream alert text with `{user}` `{text}`), **Sound** (plays a file on your PC). Defaults: song 500, bigball 100, shake 250, hype alert 300, airhorn (disabled).
+- **Mini-games** (each toggleable): `!gamble <amount|all|50%|1k>`, `!slots <amount>`, `!duel @user <amount>` → `!accept` / `!decline` within 60 s, **trivia** (`!trivia` by host/mods or every N minutes; 24 built-in questions plus your JSON packs; first correct answer wins), `!heist <amount>` (join within 60 s; success chance grows with crew size, capped), **Ball Pit race** (`!race` by host/mods or the button; `!joinrace`, `!bet <racer> <amount>`; racers run in lanes with a chequered finish line; winners' backers share the pot). Anti-abuse: per-user cooldown, a global commands-per-minute limit, bets min/max, bots, you and an excluded list never play or earn.
+- **Polls**: from the Polls sub-tab or `!poll "Question" a | b | c [seconds]` (host/mods). Vote with `!vote N`, or a bare number / option text if enabled; one vote per viewer, changeable. Live overlay card with bars and a countdown; results to chat and to the history list.
+- **Predictions**: `!prediction "Question" a | b` (or the tab), viewers `!predict <outcome#> <points>`, host `!lock`, `!resolve N`, `!cancelprediction` (refund). Parimutuel payout (rounding dust goes to the biggest winner; refund if nobody picked the winner).
+- **On-stream overlay**: poll, prediction, leaderboard (after `!top`), trivia, heist, race and toast cards, corner/width/colours configurable. With the Ball Pit live they're drawn into the pit frames; otherwise a text version is drawn by one more `drawtext` from `engage.txt` (no extra inputs either way).
+- Replies follow the existing **↩ Reply in chat** opt-in and rate limit; several replies to the same room within a second are joined with " · " and chunked to 250 characters. With replies off they show on stream while live. Engage commands are listed by `!help`.
+- The live feed now carries the sender's **userId** on every tapped message, the viewer ids from the live-viewers ACK and your own userId from the handshake (used for points and for recognising you as host). The tap is still passive.
+### Notes / caveats
+- Watch-time points need the live-viewers list (socket ACK while you're live). Viewers seen only by name are keyed by name until their id shows up.
+- The host is you (signed-in userId/username) plus the **Moderators** list (names or ids); moderation actions are not automated.
+- Ball Pit races need the Ball Pit in Source or Overlay mode while live; the camera keeps orbiting, so the track's direction on screen changes with the view.
+- The Sound reward plays .wav on Windows; on Linux it uses the same player as alert sounds.
+### Tests
+- `engage` unit suite (points/accrual/anti-spam/streaks, ledger load/migrate/backup/CSV, games incl. seeded race and parimutuel, polls/predictions parsing and results, reply batching/chunking, overlay text).
+- Engage mock end-to-end: the fake socket server's "engage" scenario sends commands from Lobby, Music, The_Bar_Alc_420 and Room B (host poll, votes incl. a bare number and a changed vote, `!addpoints`, games, `!top` after a reconnect). In headless Chrome (replayed through the bridge/router into the engine) and through the Linux WebKitGTK host, where every reply is typed into the composer of the room the command came from.
+- `engage-encode`: 60 s encodes with the poll card, a race and the leaderboard drawn into Ball Pit frames, and the text fallback, on both ffmpeg builds (samples are not release assets).
+
 ## 2.7.1 — 2026-10-27
 Built against the protocol and page structure Sam captured from the signed-in site (2.7.0's live feed was a guess and never matched).
 ### Fixed

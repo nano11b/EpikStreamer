@@ -1,4 +1,4 @@
-# EpikStreamer 2.7.1
+# EpikStreamer 2.8.0
 
 Desktop app for Windows (WPF, .NET 8) and **Linux** (Avalonia, .NET 8; Debian/Ubuntu .deb or portable tar.gz) that streams local video files to RTMP ingests such as EpikChat's
 **Go live → RTMP encoder** (server `rtmp://media.epikchat.com:1935/x` + your stream key) using ffmpeg.
@@ -7,24 +7,24 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 ## Downloads (GitHub Releases: https://github.com/nano11b/EpikStreamer/releases)
 | Package | Contents |
 |---|---|
-| `EpikStreamer-2.7.1-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
-| `EpikStreamer-v2.7.1-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
-| `EpikStreamer-v2.7.1-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
-| `epikstreamer_2.7.1_amd64.deb` / `epikstreamer_2.7.1_arm64.deb` | **Linux (Debian 12+, Ubuntu 22.04+, Mint, Raspberry Pi OS 64-bit).** Self-contained app (no .NET needed); ffmpeg, WebKitGTK and libsecret come from your distro. |
-| `epikstreamer-2.7.1-linux-amd64.tar.gz` / `-linux-arm64.tar.gz` | Portable Linux build for other distros. See `INSTALL-LINUX.txt` inside. |
+| `EpikStreamer-2.8.0-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
+| `EpikStreamer-v2.8.0-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
+| `EpikStreamer-v2.8.0-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
+| `epikstreamer_2.8.0_amd64.deb` / `epikstreamer_2.8.0_arm64.deb` | **Linux (Debian 12+, Ubuntu 22.04+, Mint, Raspberry Pi OS 64-bit).** Self-contained app (no .NET needed); ffmpeg, WebKitGTK and libsecret come from your distro. |
+| `epikstreamer-2.8.0-linux-amd64.tar.gz` / `-linux-arm64.tar.gz` | Portable Linux build for other distros. See `INSTALL-LINUX.txt` inside. |
 
 ## Install on Linux
 Debian / Ubuntu / Mint / Raspberry Pi OS (pick `amd64` or `arm64`, see `dpkg --print-architecture`):
 ```
-wget https://github.com/nano11b/EpikStreamer/releases/download/v2.7.1/epikstreamer_2.7.1_amd64.deb
+wget https://github.com/nano11b/EpikStreamer/releases/download/v2.8.0/epikstreamer_2.8.0_amd64.deb
 sha256sum -c --ignore-missing SHA256SUMS-linux.txt     # optional, after downloading SHA256SUMS-linux.txt too
-sudo apt install ./epikstreamer_2.7.1_amd64.deb
+sudo apt install ./epikstreamer_2.8.0_amd64.deb
 epikstreamer        # or "EpikStreamer" in your applications menu
 ```
 Remove it with `sudo apt remove epikstreamer`. Your settings stay in `~/.config/EpikStreamer`.
 
 Other distros: install `ffmpeg`, WebKitGTK 4.1 (`webkit2gtk4.1` / `webkit2gtk-4.1`), `libsecret` and GTK 3, then
-`tar xzf epikstreamer-2.7.1-linux-amd64.tar.gz && ./epikstreamer-2.7.1/epikstreamer`.
+`tar xzf epikstreamer-2.8.0-linux-amd64.tar.gz && ./epikstreamer-2.8.0/epikstreamer`.
 
 Linux notes:
 - Hardware encoding: NVIDIA → NVENC (proprietary driver). Intel/AMD → VA-API: install `intel-media-va-driver` or `mesa-va-drivers`, and make sure your user is in the `render` group. **Auto-detect** on the Output / Encoder tab picks whichever works, falling back to x264.
@@ -44,6 +44,32 @@ Linux notes:
 - **Profiles**: named profiles (outputs, recording, encoder, resolution/fps/bitrates, overlays, playlist) with New / Rename / Duplicate / Delete and a quick-switch dropdown.
   Saved to `%APPDATA%\EpikStreamer\profiles.json`. Stream keys are saved only when **Remember keys** is ticked, and then it's encrypted with Windows DPAPI (CurrentUser). Otherwise it's kept in memory for the session only.
   A v1 `settings.json` is migrated into a profile named **Default**, and v2.0 profiles (one server + key) become a single EpikChat output.
+
+## New in 2.8.0 — Engage (points, rewards, games, polls)
+Turn it on/off and configure everything on the **Engage** tab (per profile). Points are earned while you're live (watch time from the viewers list), for chatting (anti-spam), for chatting first and for daily streaks; they're stored per EpikChat user id in `engage/points.json` with daily backups. Replies use **↩ Reply in chat** (batched, ≤ 250 characters); cards are drawn on stream (into the Ball Pit when it's live).
+
+### Chat command reference
+| Command | Who | What |
+|---|---|---|
+| `!points [@user]` | everyone | balance and rank |
+| `!top` | everyone | top N in chat + leaderboard card on stream |
+| `!give @user N` | everyone (toggle) | transfer points |
+| `!addpoints @user N` / `!removepoints @user N` | host, mods | adjust a balance |
+| `!rewards` / `!redeem <name> [text]` | everyone | list / redeem a reward (song, bigball, shake, alert, sound) |
+| `!approve N` / `!deny N` | host, mods | pending redemptions (deny refunds) |
+| `!gamble <amount\|all\|50%\|1k>` | everyone | double or nothing |
+| `!slots <amount>` | everyone | pair ×1.5, triple ×8, 7-7-7 ×25 |
+| `!duel @user <amount>` → `!accept` / `!decline` | everyone | 50/50, 60 s to accept |
+| `!trivia` | host, mods | ask a question (or every N minutes); first correct answer wins |
+| `!heist <amount>` | everyone | join within 60 s; odds grow with the crew |
+| `!race` / `!joinrace` / `!bet <racer> <amount>` | host, mods / everyone | Ball Pit race; backers of the winner share the pot |
+| `!poll "Question" a \| b \| c [seconds]` / `!endpoll` | host, mods | start / end a poll |
+| `!vote N` (or just `N` / the option text) | everyone | vote; voting again changes it |
+| `!prediction "Question" a \| b` | host, mods | open a prediction |
+| `!predict <outcome#> <points>` | everyone | stake points |
+| `!lock` / `!resolve N` / `!cancelprediction` | host, mods | lock, pay out (parimutuel), refund |
+
+Trivia packs are JSON: `[{"q": "Question?", "a": ["answer", "alt"], "category": "music"}]`.
 
 ## New in 2.7.1
 - **Chat commands work in every room you're in.** The live feed now decodes EpikChat's real realtime protocol (socket.io with binary msgpack packets, verified from a signed-in capture), so `!help`, `!song`, requests etc. are seen in all joined rooms, not just the one on screen. The default **Command room** is now `*` (all rooms; settings from 2.7.0 that were blank are moved to `*` once). You can still type one room name.
