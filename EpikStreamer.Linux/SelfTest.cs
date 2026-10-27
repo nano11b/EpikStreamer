@@ -30,6 +30,7 @@ static class SelfTest
                 "--selftest-golive" => await GoLive(args[1]),
                 "--selftest-members" => await Members(args[1], args[2]),
                 "--selftest-tap" => await Tap(args[1], args[2]),
+                "--selftest-engage" => await Engage(args[1], args[2]),
                 "--selftest-secret" => Secret_(),
                 _ => Usage(),
             };
@@ -173,6 +174,73 @@ static class SelfTest
             P($"  tap selftest: page {t.Length} chars, C# received {received.Count} messages, {viewers.Count} viewer snapshots, {replies.Count} replies → {outFile}");
             await chat.SetActive(false);
             return t.StartsWith("{") ? 0 : 1;
+        }
+        finally { try { srv.Kill(true); } catch { } }
+    }
+
+    /// <summary>v2.8 Engage end-to-end through the real ChatPanel/WebKitGTK host: ws-server.js "engage" scenario (commands from
+    /// Lobby / Music / The_Bar / Room B, host poll + votes, !addpoints, games, !top) → router → EngageEngine → ReplyBatcher →
+    /// ChatPanel.SendChat(text, room), which types into the mock page's composer after switching rooms. Writes the same record
+    /// shape as `engagereplay` plus what the composer actually received.</summary>
+    static async Task<int> Engage(string mockDir, string outFile)
+    {
+        var srv = new System.Diagnostics.Process { StartInfo = new("node", $"\"{Path.Combine(mockDir, "ws-server.js")}\" 0 150 engage") { RedirectStandardOutput = true, UseShellExecute = false } };
+        srv.Start();
+        try
+        {
+            var line = await srv.StandardOutput.ReadLineAsync() ?? ""; var port = Regex.Match(line, @"PORT (\d+)").Groups[1].Value;
+            var html = File.ReadAllText(Path.Combine(mockDir, "epikchat-tap.html")).Replace("<script src=\"chat-observer.js\"></script>", "").Replace("<script src=\"chat-tap.js\"></script>", "")
+                .Replace("<script src=\"msgpack-mini.js\"></script>", "<script>" + File.ReadAllText(Path.Combine(mockDir, "msgpack-mini.js")) + "</script>")
+                .Replace("const t0 = Date.now();", "const t0 = Date.now(); window.__holdMs = 4000;");
+            var f = Tmp("engage.html", html);
+            var chat = new ChatPanel { ChatUrl = "file://" + f + "#port=" + port, DebugMessages = true, SelfName = "", ReplyMinIntervalSeconds = 1 };
+            var fs = new ChatFeedSettings { ViewersRestFallback = false }; fs.Migrate();
+            chat.Feed.S = fs; chat.OnScreen = () => false;
+            var es = new EngageSettings { UserCooldownSeconds = 0 };
+            var e = new EngageEngine(es, new PointsLedger(), new Random(7)) { DefaultRoom = () => "Lobby" };
+            var batch = new ReplyBatcher(); var replies = new List<object>(); var msgs = new List<object>(); var sends = new List<Task<string>>(); var lk = new object();
+            e.StartStream(DateTime.Now);
+            chat.MessageReceived += m =>
+            {
+                lock (lk)
+                {
+                    if (m.UserId.Length == 0) { var id = chat.Feed.UserIdOf(m.User); if (id.Length > 0) m = m with { UserId = id }; }
+                    e.SelfId = chat.Feed.SelfId; e.SelfName = chat.Feed.Self;
+                    var o = e.Handle(m, DateTime.Now);
+                    msgs.Add(new { user = m.User, text = m.Text, room = m.Room, userId = m.UserId, self = m.Self, handled = o.Handled });
+                    foreach (var (room, text) in o.Replies) batch.Add(room, text);
+                }
+            };
+            chat.ViewersReceived += (src, n) => { if (src == "LiveViewers") lock (lk) e.OnViewers(n.Select(x => (chat.Feed.UserIdOf(x), x)), DateTime.Now); };
+            using var cts = new CancellationTokenSource();
+            var pump = Task.Run(async () =>
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    await Task.Delay(1000);
+                    lock (lk)
+                    {
+                        foreach (var (room, text) in e.Tick(DateTime.Now).Replies) batch.Add(room, text);
+                        foreach (var (room, text) in batch.Flush()) { replies.Add(new { room, text }); P($"  reply → {room}: {text}"); sends.Add(chat.SendChat(text, room)); }
+                    }
+                }
+            });
+            await chat.SetActive(true);
+            var b = await Client();
+            string title = "";
+            for (int i = 0; i < 120 && !title.Contains("\\\"done\\\""); i++) { await Task.Delay(500); title = await b.EvalAsync("chat", "document.title"); }
+            await Task.Delay(2500); cts.Cancel(); await pump;
+            Task<string>[] all; lock (lk) all = sends.ToArray();
+            var results = await Task.WhenAll(all);
+            for (int i = 0; i < 60 && chat.QueuedReplies > 0; i++) await Task.Delay(500);
+            await Task.Delay(1500);
+            var sent = JsonDocument.Parse(JsonSerializer.Deserialize<string>(await b.EvalAsync("chat", "JSON.stringify(window.__mockState().sent)")) ?? "[]").RootElement;
+            var ledger = e.Ledger.Snapshot().Select(u => new { u.Id, u.Name, u.Points, u.WatchMinutes, u.Messages }).ToList();
+            object snap; lock (lk) snap = new { messages = msgs.ToList(), replies = replies.ToList(), ledger, selfId = chat.Feed.SelfId, history = e.PollHistory, sent, sendResults = results, queued = chat.QueuedReplies };
+            File.WriteAllText(outFile, JsonSerializer.Serialize(snap));
+            P($"  engage selftest: {msgs.Count} messages, {replies.Count} replies, results [{string.Join(", ", results)}] → {outFile}");
+            await chat.SetActive(false);
+            return title.Contains("done") ? 0 : 1;
         }
         finally { try { srv.Kill(true); } catch { } }
     }

@@ -13,7 +13,7 @@ fs.writeFileSync(path.join(dir, 'chat-observer.js'), 'window.__EPIK_CFG={"debug"
 const kill = [];
 const fail = m => { console.error(m); kill.forEach(p => { try { p.kill('SIGKILL'); } catch { } }); process.exit(1); };
 setTimeout(() => fail('timeout'), 60000);
-const ws = spawn('node', [path.join(here, 'ws-server.js'), '0', '70']); kill.push(ws);
+const ws = spawn('node', [path.join(here, 'ws-server.js'), '0', '70', ...(process.env.EPIK_SCENARIO ? [process.env.EPIK_SCENARIO] : [])]); kill.push(ws);
 ws.stdout.once('data', async d => {
   const port = /PORT (\d+)/.exec(String(d))[1];
   const cdp = 9300 + Math.floor(Math.random() * 500);

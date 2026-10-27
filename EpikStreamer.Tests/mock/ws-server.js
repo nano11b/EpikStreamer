@@ -21,7 +21,30 @@ const accepted = () => ev('connectionAccepted', { serverVersion: '3.14.0', userD
   favorites: [{ type: 'room', roomId: LOBBY, name: 'Lobby', unread: 0 }], chatCommandsBotId: BOT, mutedBotIds: [] } });
 const sidebar = c => ({ rooms: [{ _id: BAR, name: 'The_Bar_Alc_420', type: 'room', memberCount: 41 }, { _id: MUSIC, name: 'Music', type: 'room', memberCount: 9 }, { _id: ROOMB, name: 'Room B', type: 'room', memberCount: 3 }],
   recentMessages: c === 1 ? [msg(1, BAR, 'old1', '!help'), msg(2, LOBBY, 'old2', '!song')] : [msg(1, BAR, 'old1', '!help'), msg(2, LOBBY, 'old2', '!song'), msg(10, BAR, 'alice', '!help')] });
+const ENGAGE = process.argv[4] === 'engage';
+// v2.8 Engage scenario: commands from several rooms (replies must land in the room each came from), a host poll with votes
+// from other rooms (incl. a bare number and a changed vote), host !addpoints, a points check, a game and !top after the reconnect.
+function engageSteps(c, n) {
+  if (c === 1) return ({
+    0: [ev('message', msg(20, LOBBY, 'alice', 'hi everyone')),
+        ev('message', msg(21, MUSIC, 'bob', '!points')),
+        ev('message', msg(22, LOBBY, 'MeStreamer', '!poll "Best colour?" red | blue 60', { senderId: SELF }))],
+    1: [ev('message', msg(23, LOBBY, 'alice', '!vote 2')),
+        ev('message', msg(24, BAR, 'carol', '1')),
+        ev('message', msg(25, MUSIC, 'bob', '!vote 2')),
+        ev('message', msg(26, LOBBY, 'MeStreamer', '!addpoints bob 500', { senderId: SELF })),
+        ev('message', msg(27, MUSIC, 'zed', '!gamble 10'))],
+    2: ['PING'],
+    3: ['CLOSE'],
+  })[n] || [];
+  return ({
+    0: [ev('message', msg(28, ROOMB, 'bob', '!vote 1')), ev('message', msg(29, MUSIC, 'bob', '!gamble 100'))],
+    1: [ev('message', msg(30, LOBBY, 'MeStreamer', '!endpoll', { senderId: SELF })), ev('message', msg(31, BAR, 'alice', '!top'))],
+    2: ['PING'],
+  })[n] || [];
+}
 function steps(c, n) {
+  if (ENGAGE) return engageSteps(c, n);
   if (c === 1) return ({
     0: [ev('message', msg(10, BAR, 'alice', '!help')),                                         // not the visible room
         ev('message', msg(11, LOBBY, 'MeStreamer', '!song', { senderId: SELF })),               // self

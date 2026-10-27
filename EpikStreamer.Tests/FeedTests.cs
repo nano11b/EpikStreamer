@@ -98,7 +98,7 @@ static class FeedReplay
         var t0 = new DateTime(2026, 10, 27, 12, 0, 0);
         var r = new ChatFeedRouter(new ChatFeedSettings { CommandRoom = room });
         var msgs = new List<object>(); var views = new List<object>(); var status = new List<string>();
-        r.Message += m => msgs.Add(new { user = m.User, text = m.Text, id = m.Id, room = m.Room, isBot = m.IsBot, self = m.Self });
+        r.Message += m => msgs.Add(new { user = m.User, text = m.Text, id = m.Id, room = m.Room, isBot = m.IsBot, self = m.Self, userId = m.UserId });
         r.Viewers += (s, n) => views.Add(new { source = s, names = n.ToList() });
         DateTime now = t0;
         foreach (var x in doc.RootElement.GetProperty("all").EnumerateArray())
@@ -109,8 +109,47 @@ static class FeedReplay
             ChatFeedBridge.Handle(m, type, r, now, status.Add);
         }
         r.Flush(now.AddSeconds(5));
-        File.WriteAllText(outFile, System.Text.Json.JsonSerializer.Serialize(new { messages = msgs, viewers = views, status, source = r.SourceStatus(now), fromTap = r.FromTap, fromDom = r.FromDom, duplicates = r.Duplicates, otherRoom = r.OtherRoom, unmatched = r.Unmatched, reconnects = r.TapReconnects }));
+        File.WriteAllText(outFile, System.Text.Json.JsonSerializer.Serialize(new { messages = msgs, viewers = views, status, selfId = r.SelfId, source = r.SourceStatus(now), fromTap = r.FromTap, fromDom = r.FromDom, duplicates = r.Duplicates, otherRoom = r.OtherRoom, unmatched = r.Unmatched, reconnects = r.TapReconnects }));
         Console.WriteLine($"replayed → {outFile}: {msgs.Count} messages, {views.Count} viewer snapshots");
+        return 0;
+    }
+}
+
+/// <summary>v2.8: replays an Engage-scenario tap-mock page record (EPIK_SCENARIO=engage) through the bridge + router into the
+/// EngageEngine, ticking once a second, and records the batched replies with the room each would be posted to.
+/// usage: dotnet T engagereplay page.json out.json</summary>
+static class EngageReplay
+{
+    public static int Run(string inFile, string outFile)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(inFile));
+        var t0 = new DateTime(2026, 10, 27, 12, 0, 0);
+        var r = new ChatFeedRouter(new ChatFeedSettings { CommandRoom = "*" });
+        var s = new EngageSettings(); s.UserCooldownSeconds = 0;
+        var e = new EngageEngine(s, new PointsLedger(), new Random(7)) { DefaultRoom = () => "Lobby" };
+        var batch = new ReplyBatcher(); var replies = new List<object>(); var msgs = new List<object>(); var status = new List<string>();
+        DateTime now = t0, lastTick = t0;
+        e.StartStream(t0);
+        r.Message += m =>
+        {
+            if (m.UserId.Length == 0) { var id = r.UserIdOf(m.User); if (id.Length > 0) m = m with { UserId = id }; }
+            e.SelfId = r.SelfId; e.SelfName = r.Self;
+            var o = e.Handle(m, now); msgs.Add(new { user = m.User, text = m.Text, room = m.Room, userId = m.UserId, self = m.Self, handled = o.Handled });
+            foreach (var (room, text) in o.Replies) batch.Add(room, text);
+        };
+        r.Viewers += (src, n) => { if (src == "LiveViewers") e.OnViewers(n.Select(x => (r.UserIdOf(x), x)), now); };
+        void Tick(DateTime t) { while ((t - lastTick).TotalSeconds >= 1) { lastTick = lastTick.AddSeconds(1); foreach (var (room, text) in e.Tick(lastTick).Replies) batch.Add(room, text); foreach (var (room, text) in batch.Flush()) replies.Add(new { room, text, t = (lastTick - t0).TotalSeconds }); } }
+        foreach (var x in doc.RootElement.GetProperty("all").EnumerateArray())
+        {
+            now = t0.AddMilliseconds(x.GetProperty("t").GetDouble());
+            r.Flush(now); Tick(now);
+            var m = x.GetProperty("m"); var type = m.TryGetProperty("type", out var tp) ? tp.GetString() ?? "" : "";
+            ChatFeedBridge.Handle(m, type, r, now, status.Add);
+        }
+        r.Flush(now.AddSeconds(5)); Tick(now.AddSeconds(5));
+        var ledger = e.Ledger.Snapshot().Select(u => new { u.Id, u.Name, u.Points, u.WatchMinutes, u.Messages }).ToList();
+        File.WriteAllText(outFile, System.Text.Json.JsonSerializer.Serialize(new { messages = msgs, replies, ledger, selfId = r.SelfId, history = e.PollHistory }));
+        Console.WriteLine($"engage replay → {outFile}: {msgs.Count} messages, {replies.Count} reply batches");
         return 0;
     }
 }

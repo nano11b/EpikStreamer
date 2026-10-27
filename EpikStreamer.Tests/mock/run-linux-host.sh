@@ -65,3 +65,6 @@ PY
 # v2.7 live feed (tap + observer + router) through the WebKitGTK host, with the fake local WebSocket server
 "$B" --selftest-tap . "$out/tap.json"
 python3 tap-check.py "$out/tap.json" --host
+# v2.8 Engage: commands from several rooms → EngageEngine → replies posted through the composer in each source room
+"$B" --selftest-engage . "$out/engage.json"
+python3 engage-check.py "$out/engage.json"

@@ -57,7 +57,8 @@ public sealed class Poll
         var t = Regex.Replace(text.Trim(), @"^!poll\s*", "", RegexOptions.IgnoreCase);
         int secs = defSecs;
         var lead = Regex.Match(t, @"^(\d{1,4})\s*(s|m)?\s+"); if (lead.Success) { secs = int.Parse(lead.Groups[1].Value) * (lead.Groups[2].Value == "m" ? 60 : 1); t = t[lead.Length..]; }
-        var trail = Regex.Match(t, @"\s+(\d{1,4})\s*(s|m)$"); if (trail.Success) { secs = int.Parse(trail.Groups[1].Value) * (trail.Groups[2].Value == "m" ? 60 : 1); t = t[..trail.Index]; }
+        // trailing duration: "60s"/"2m", or a bare number after the last option's text ("… | blue 60"); "| 60" stays an option
+        var trail = Regex.Match(t, @"(?<=[^|\s])\s+(\d{1,4})\s*(s|m)?$"); if (trail.Success && t[..trail.Index].Contains('|')) { secs = int.Parse(trail.Groups[1].Value) * (trail.Groups[2].Value == "m" ? 60 : 1); t = t[..trail.Index]; }
         string q; List<string> opts;
         var quoted = Regex.Match(t, "^[\"“](.+?)[\"”]\\s*(.*)$");
         if (quoted.Success) { q = quoted.Groups[1].Value.Trim(); opts = quoted.Groups[2].Value.Split('|').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(); }

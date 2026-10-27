@@ -230,6 +230,8 @@ static class EngageTests
         {
             var pp = Poll.Parse("!poll \"Best snack?\" chips | popcorn | fruit 2m", 90);
             Check(pp is { } x && x.Q == "Best snack?" && x.Opts.Count == 3 && x.Secs == 120, "poll parse (quoted, trailing duration)");
+            Check(Poll.Parse("!poll \"Best colour?\" red | blue 60", 90) is { Secs: 60 } b && b.Opts[1] == "blue", "poll parse: bare trailing seconds after the last option");
+            Check(Poll.Parse("!poll \"How long?\" 30 | 60", 90) is { Secs: 90 } n && n.Opts.SequenceEqual(new[] { "30", "60" }), "poll parse: numeric options stay options");
             Check(Poll.Parse("!poll 30 Pizza or tacos? | pizza | tacos", 90) is { Secs: 30, Opts.Count: 2 }, "poll parse (unquoted, leading duration)");
             Check(Poll.Parse("!poll \"Q\" only", 90) == null && Poll.Parse("!poll", 90) == null, "poll parse rejects <2 options");
             Check(Poll.Percents(new[] { 1, 1, 1 }).Sum() == 100 && Poll.Percents(new[] { 2, 1, 0 }).SequenceEqual(new[] { 67, 33, 0 }) && Poll.Percents(new[] { 0, 0 }).Sum() == 0, "percentages add up to 100");
