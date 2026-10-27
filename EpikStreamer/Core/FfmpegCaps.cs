@@ -16,6 +16,10 @@ public sealed class FfmpegCaps
     public bool AtomicWriting { get; init; } = true;
     public bool FlvFlags { get; init; } = true;
     public bool DshowBufferSize { get; init; } = true;
+    /// <summary>http protocol -reconnect/-reconnect_streamed, -reconnect_delay_max, and the generic -rw_timeout (v2.6 radio relay).</summary>
+    public bool HttpReconnect { get; init; } = true;
+    public bool HttpReconnectDelayMax { get; init; } = true;
+    public bool RwTimeout { get; init; } = true;
     /// <summary>null = unknown/assume everything is present.</summary>
     public HashSet<string>? Filters { get; init; }
     public HashSet<string>? Encoders { get; init; }
@@ -75,6 +79,8 @@ public sealed class FfmpegCaps
         var image2 = Run(ffmpeg, 10000, "-hide_banner", "-h", "muxer=image2").text;
         var flv = Run(ffmpeg, 10000, "-hide_banner", "-h", "muxer=flv").text;
         var dshow = Run(ffmpeg, 10000, "-hide_banner", "-h", "demuxer=dshow").text;
+        var http = Run(ffmpeg, 10000, "-hide_banner", "-h", "protocol=http").text;
+        bool httpOk = http.Contains("reconnect");
         var filters = Names(Run(ffmpeg, 10000, "-hide_banner", "-filters").text, @"^\s*[A-Z.|]{2,4}\s+(\w+)\s");
         var encoders = Names(Run(ffmpeg, 10000, "-hide_banner", "-encoders").text, @"^\s*[VASFXBD.]{6}\s+(\w+)\s");
         var encOpts = new Dictionary<string, HashSet<string>>();
@@ -90,6 +96,9 @@ public sealed class FfmpegCaps
             AtomicWriting = !image2.Contains("image2") || image2.Contains("atomic_writing"),
             FlvFlags = !flv.Contains("flv") || flv.Contains("flvflags"),
             DshowBufferSize = !dshow.Contains("dshow") || dshow.Contains("audio_buffer_size"),
+            HttpReconnect = !httpOk || http.Contains("reconnect_streamed"),
+            HttpReconnectDelayMax = !httpOk || http.Contains("reconnect_delay_max"),
+            RwTimeout = !helpOk || full.Contains("rw_timeout") || http.Contains("rw_timeout"),
             Filters = filters.Count > 50 ? filters : null,
             Encoders = encoders.Count > 10 ? encoders : null,
             EncoderOptions = encOpts.Count > 0 ? encOpts : null,

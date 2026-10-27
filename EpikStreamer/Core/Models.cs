@@ -94,6 +94,7 @@ public class Profile
     public AudioSettings Audio { get; set; } = new();   // v2.2
     public NowPlayingSettings NowPlaying { get; set; } = new();   // v2.3
     public BallPitSettings BallPit { get; set; } = new();         // v2.5
+    public RadioSettings Radio { get; set; } = new();             // v2.6
 
     public Profile Clone(string newName)
     {

@@ -159,7 +159,7 @@ static class BallPitTests
         return fails;
     }
 
-    static BallPitScene DemoScene(int n, int seed, BallPitSettings? s = null)
+    public static BallPitScene DemoScene(int n, int seed, BallPitSettings? s = null)
     {
         var sc = new BallPitScene(s ?? new BallPitSettings(), seed);
         var texs = Enumerable.Range(0, 12).Select(i => BallPitTextures.FromEncoded(FakeAvatar(i))!).ToArray();

@@ -67,6 +67,7 @@ public sealed class StreamEngine
     public string TitleOf(string path) => string.IsNullOrEmpty(path) ? "" : Library?.Invoke(path)?.Display is { Length: > 0 } t ? t : LibraryItem.TitleFromFile(path);
     public NowPlayingInfo? NowPlaying()
     {
+        if (RadioActive && RadioInfo?.Invoke() is { } radio) return radio;   // v2.6: the radio track takes over the card
         var item = _onAir; if (item.Length == 0) return null;
         var lib = Library?.Invoke(item);
         double dur = lib?.Duration > 0 ? lib.Duration : (_probeCache.TryGetValue(item, out var mi) ? mi.Duration : 0);
@@ -122,6 +123,30 @@ public sealed class StreamEngine
     public StreamEngine(Profile profile, string ffmpeg, string outputUrl, string? secretForLogMasking, string? workDir = null)
         : this(profile, ffmpeg, new[] { new CommandBuilder.Destination("Output", outputUrl) }, secretForLogMasking == null ? Array.Empty<string>() : new[] { secretForLogMasking }, workDir) { }
 
+    // ---- v2.6 Radio ----
+    /// <summary>Resolved stream URLs (preference order) set by the host before Start; with Profile.Radio enabled a relay keeps the station connected for the whole run.</summary>
+    public List<string>? RadioUrls { get; set; }
+    /// <summary>Radio card info for the now-playing card (host-provided from the AzuraCast poller); null = use the playlist track.</summary>
+    public Func<NowPlayingInfo?>? RadioInfo { get; set; }
+    /// <summary>Called with each 20 ms chunk's loudness (0..1) — drives the Ball Pit beat pulse.</summary>
+    public Action<float>? RadioLevel { get; set; }
+    /// <summary>Test hook: rewrites the relay's input URL.</summary>
+    public Func<string, string>? RadioUrlFilter { get; set; }
+    public RadioRelay? Radio { get; private set; }
+    public RadioFeed? RadioFeedNow { get; private set; }
+    public bool RadioActive => Radio != null;
+    public bool RadioMuted { get; private set; }
+    public bool SetRadioMuted(bool m) { RadioMuted = m; return !RadioActive || !IsRunning || Ctl("volume@radio", "volume", m ? "0" : Inv(_p.Radio.Volume)); }
+    public bool SetRadioVolume(double v) { _p.Radio.Volume = v; return RadioMuted || !RadioActive || !IsRunning || Ctl("volume@radio", "volume", Inv(v)); }
+    /// <summary>Pops the now-playing card for a new radio song.</summary>
+    public void RadioTrackChanged(string key) => _np?.TrackChanged("radio|" + key);
+    void StartRadioFeed(int port)
+    {
+        RadioFeedNow?.Dispose();
+        var f = new RadioFeed(Radio!, port); f.Log += Emit; f.OnLevel = RadioLevel; RadioFeedNow = f; f.Start();
+    }
+    void StopRadio() { RadioFeedNow?.Dispose(); RadioFeedNow = null; Radio?.Dispose(); Radio = null; }
+
     // ---- v2.5 Ball Pit ----
     /// <summary>The scene to stream (host-owned; also used for the in-app preview). Ignored when the profile's Ball Pit mode is Off.</summary>
     public BallPitScene? BallPit { get; set; }
@@ -166,6 +191,17 @@ public sealed class StreamEngine
         if (_p.Playlist.Count == 0) throw new InvalidOperationException("Playlist is empty.");
         if (_netDests.Count == 0 && !_p.RecordEnabled) throw new InvalidOperationException("No enabled output and recording is off.");
         PrepareOverlayFiles();
+        StopRadio();
+        if (_p.Radio.Active)
+        {
+            if (RadioUrls is { Count: > 0 } ru)
+            {
+                Radio = new RadioRelay(_ffmpeg, ru, FfmpegCaps.Probe(_ffmpeg)) { UrlFilter = RadioUrlFilter };
+                Radio.Log += Emit; Radio.Start();
+                Emit($"📻 Radio: {RadioRelayHost(ru[0])}{(ru.Count > 1 ? $" (+{ru.Count - 1} fallback)" : "")}, volume {Math.Round(_p.Radio.Volume * 100)}%.");
+            }
+            else Emit("📻 Radio is on but its URL could not be resolved; streaming without it.");
+        }
         _onAir = ""; _upNext = ""; _np?.Dispose(); _np = null;
         if (_p.NowPlaying.Enabled)
         {
@@ -190,6 +226,7 @@ public sealed class StreamEngine
         { Emit("Next item is already starting."); return; }
         _skip = true; KillFeeder();
     }
+    static string RadioRelayHost(string u) => Uri.TryCreate(u, UriKind.Absolute, out var x) ? x.Host + x.AbsolutePath : u;
     public void Stop() { _stop = true; _cts?.Cancel(); KillFeeder(); Interlocked.Increment(ref _musicGen); Interlocked.Increment(ref _pitGen); }
 
     // ---- runtime control (v2.2) ----
@@ -403,7 +440,7 @@ public sealed class StreamEngine
         finally
         {
             KillFeeder(); Interlocked.Increment(ref _musicGen); Interlocked.Increment(ref _pitGen); try { if (_enc is { HasExited: false }) _enc.Kill(true); } catch { }
-            _ctl?.Dispose(); _ctl = null; _alertTimer?.Dispose(); _chatTimer?.Dispose(); _np?.Dispose();
+            _ctl?.Dispose(); _ctl = null; _alertTimer?.Dispose(); _chatTimer?.Dispose(); _np?.Dispose(); StopRadio();
             for (int i = 0; i < _netDests.Count; i++) DestinationStatus?.Invoke(i, DestState.Stopped, "");
             RemuxRecordings();
             IsRunning = false; Finished?.Invoke();
@@ -448,11 +485,12 @@ public sealed class StreamEngine
         int ctlPort = RuntimeControl && caps.HasFilter("azmq") ? StreamControl.FreePort() : 0;
         int musicPort = MusicActive ? StreamControl.FreePort() : 0;
         int pitPort = PitActive ? StreamControl.FreePort() : 0;
+        int radioPort = RadioActive ? StreamControl.FreePort() : 0;
         double rs = Math.Clamp(_p.BallPit.RenderScale, 0.25, 1);
         int pw = Math.Max(16, (int)(_p.Width * rs) & ~1), ph = Math.Max(16, (int)(_p.Height * rs) & ~1);
         var lo = new CommandBuilder.LiveOptions(ctlPort, musicPort, MicActive ? a.MicDevice : null, TextOverlays,
             MusicMuted ? 0 : a.MusicVolume, MicMuted ? 0 : a.MicVolume, a.MainVolume, _np != null,
-            pitPort, PitActive ? _p.BallPit.Mode : "", pw, ph);
+            pitPort, PitActive ? _p.BallPit.Mode : "", pw, ph, radioPort, RadioMuted ? 0 : _p.Radio.Volume);
         _ctl?.Dispose(); _ctl = ctlPort > 0 ? new StreamControl(ctlPort) : null;
         var args = CommandBuilder.EncoderArgs(_p, dests, hasLogo, lo, caps);
         Emit("> ffmpeg " + CommandBuilder.Display(args, _secrets));
@@ -505,6 +543,7 @@ public sealed class StreamEngine
         p.Start(); p.BeginOutputReadLine(); p.BeginErrorReadLine();
         if (musicPort > 0) StartMusic(musicPort);
         if (pitPort > 0) StartPitFeed(pitPort, pw, ph, _p.BallPit.Mode == "Overlay");
+        if (radioPort > 0) StartRadioFeed(radioPort);
         lock (_lk) _enc = p;
         _lastProgress = DateTime.UtcNow; _outTime = 0; _encTl0 = _tl;
 

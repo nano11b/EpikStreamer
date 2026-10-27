@@ -9,6 +9,8 @@ public sealed class ChatCommands
     public sealed class Context
     {
         public string Song = ""; public TimeSpan Uptime; public int? Viewers; public string Music = "";
+        /// <summary>v2.6: set while the radio is on (current/last radio track, station name, the radio's !song / !lastsong templates).</summary>
+        public string Radio = "", RadioLast = "", Station = "", RadioSongTemplate = "", RadioLastTemplate = "";
     }
     readonly ChatSettings _s; readonly Dictionary<string, DateTime> _last = new(StringComparer.OrdinalIgnoreCase);
     readonly HashSet<string> _seen = new(); readonly Queue<string> _seenQ = new();
@@ -35,7 +37,11 @@ public sealed class ChatCommands
         return true;
     }
 
-    public IEnumerable<string> Triggers => new[] { "!song", "!uptime", "!help" }.Concat(BallPit != null && BallPitListed ? BallPitScene.CommandNames : Array.Empty<string>()).Concat(_s.Custom.Where(c => c.Enabled).Select(c => c.Trigger.Trim().ToLowerInvariant()));
+    /// <summary>v2.6: list !np / !lastsong (and !request when radio requests are on) in !help.</summary>
+    public bool RadioListed { get; set; }
+    public bool RadioRequestsListed { get; set; }
+    public IEnumerable<string> Triggers => new[] { "!song", "!uptime", "!help" }
+        .Concat(RadioListed ? new[] { "!np", "!lastsong" } : Array.Empty<string>()).Concat(RadioRequestsListed ? new[] { "!request" } : Array.Empty<string>()).Concat(BallPit != null && BallPitListed ? BallPitScene.CommandNames : Array.Empty<string>()).Concat(_s.Custom.Where(c => c.Enabled).Select(c => c.Trigger.Trim().ToLowerInvariant()));
 
     /// <summary>Returns the response for a message or null (not a command, cooldown, duplicate, or our own reply).</summary>
     public string? Handle(ChatMessage m, Context ctx, DateTime now)
@@ -52,12 +58,15 @@ public sealed class ChatCommands
         var cmd = text.Split(' ', 2)[0].ToLowerInvariant();
         string? tpl = cmd switch
         {
-            "!song" => _s.SongTemplate,
+            "!song" or "!np" when ctx.Radio.Length > 0 => ctx.RadioSongTemplate.Length > 0 ? ctx.RadioSongTemplate : "Now playing: {radio}",
+            "!lastsong" when ctx.RadioLast.Length > 0 => ctx.RadioLastTemplate.Length > 0 ? ctx.RadioLastTemplate : "Last song: {last}",
+            "!song" or "!np" => _s.SongTemplate,
             "!uptime" => _s.UptimeTemplate,
             "!help" => "Commands: " + string.Join(" ", Triggers.Distinct()),
             _ => _s.Custom.FirstOrDefault(c => c.Enabled && string.Equals(c.Trigger.Trim(), cmd, StringComparison.OrdinalIgnoreCase))?.Response,
         };
         if (tpl == null) return null;
+        if (cmd == "!np") cmd = "!song";   // shared cooldown
         if (_last.TryGetValue(cmd, out var t) && (now - t).TotalSeconds < _s.CooldownSeconds) return null;
         _last[cmd] = now;
         var r = Expand(tpl, ctx, m.User);
@@ -70,7 +79,10 @@ public sealed class ChatCommands
         .Replace("{music}", string.IsNullOrEmpty(c.Music) ? "(no music)" : c.Music)
         .Replace("{uptime}", FormatUptime(c.Uptime))
         .Replace("{viewers}", c.Viewers?.ToString() ?? "?")
-        .Replace("{user}", user);
+        .Replace("{user}", user)
+        .Replace("{station}", string.IsNullOrEmpty(c.Station) ? "the radio" : c.Station)
+        .Replace("{radio}", string.IsNullOrEmpty(c.Radio) ? "(radio off)" : c.Radio)
+        .Replace("{last}", string.IsNullOrEmpty(c.RadioLast) ? "(unknown)" : c.RadioLast);
 
     public static string FormatUptime(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes:00}m" : t.TotalMinutes >= 1 ? $"{t.Minutes}m {t.Seconds:00}s" : $"{t.Seconds}s";
 }

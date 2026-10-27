@@ -1,0 +1,165 @@
+{
+ "station": {
+  "id": 1,
+  "name": "7LFM",
+  "shortcode": "labsfm",
+  "description": "Seven Labs Radio",
+  "frontend": "icecast",
+  "backend": "liquidsoap",
+  "timezone": "UTC",
+  "listen_url": "https://radio.seven-labs.com/listen/labsfm/impulsivefrequencies",
+  "url": "https://radio.seven-labs.com",
+  "public_player_url": "https://radio.seven-labs.com/public/labsfm",
+  "playlist_pls_url": "https://radio.seven-labs.com/public/labsfm/playlist.pls",
+  "playlist_m3u_url": "https://radio.seven-labs.com/public/labsfm/playlist.m3u",
+  "is_public": true,
+  "requests_enabled": true,
+  "mounts": [
+   {
+    "id": 1,
+    "name": "/radio.mp3 (192kbps MP3)",
+    "url": "https://radio.seven-labs.com/listen/labsfm/impulsivefrequencies",
+    "bitrate": 192,
+    "format": "mp3",
+    "listeners": {
+     "total": 0,
+     "unique": 0,
+     "current": 0
+    },
+    "path": "/impulsivefrequencies",
+    "is_default": true
+   }
+  ],
+  "remotes": [],
+  "hls_enabled": true,
+  "hls_is_default": false,
+  "hls_url": "https://radio.seven-labs.com/hls/labsfm/live.m3u8",
+  "hls_listeners": 0
+ },
+ "listeners": {
+  "total": 0,
+  "unique": 0,
+  "current": 0
+ },
+ "live": {
+  "is_live": false,
+  "streamer_name": "",
+  "broadcast_start": null,
+  "art": null
+ },
+ "now_playing": {
+  "sh_id": 14841,
+  "played_at": 1793064452,
+  "duration": 276,
+  "playlist": "EDM",
+  "playlist_chain": null,
+  "playlist_source": "songs",
+  "streamer": "",
+  "is_request": false,
+  "song": {
+   "id": "70cdaf32eb3714c75cf092591d1a747a",
+   "art": "https://radio.seven-labs.com/api/station/labsfm/art/b513180a0d4b63b98c0d7363-1789243375.jpg",
+   "custom_fields": [],
+   "text": "Nasko - Take On The World - Take On The World",
+   "artist": "Nasko",
+   "title": "Take On The World",
+   "album": "Take On The World",
+   "genre": "",
+   "isrc": "",
+   "lyrics": ""
+  },
+  "elapsed": 143,
+  "remaining": 133
+ },
+ "playing_next": {
+  "cued_at": 1793064447,
+  "played_at": 1793064865,
+  "duration": 184.51201184275,
+  "playlist": "EDM",
+  "playlist_chain": null,
+  "playlist_source": "songs",
+  "is_request": false,
+  "song": {
+   "id": "57f8da5f9ab7b909eb4003ae558e68ac",
+   "art": "https://radio.seven-labs.com/api/station/labsfm/art/cb7729255b6cead332f4ac94-1789483422.jpg",
+   "custom_fields": [],
+   "text": "Exyl - Moai Samurai - Moai Samurai",
+   "artist": "Exyl",
+   "title": "Moai Samurai",
+   "album": "Moai Samurai",
+   "genre": "",
+   "isrc": "",
+   "lyrics": ""
+  }
+ },
+ "song_history": [
+  {
+   "sh_id": 14840,
+   "played_at": 1793064261,
+   "duration": 200,
+   "playlist": "EDM",
+   "playlist_chain": null,
+   "playlist_source": "songs",
+   "streamer": "",
+   "is_request": false,
+   "song": {
+    "id": "7a0f87b4650b5a53f0a1ce13f0ac5dd6",
+    "art": "https://radio.seven-labs.com/api/station/labsfm/art/f57100d3b68655438deb5882-1789483523.jpg",
+    "custom_fields": [],
+    "text": "Subtronics - Fibonacci - Antidote (Midnight Coffee)",
+    "artist": "Subtronics",
+    "title": "Antidote (Midnight Coffee)",
+    "album": "Fibonacci",
+    "genre": "",
+    "isrc": "",
+    "lyrics": ""
+   }
+  },
+  {
+   "sh_id": 14839,
+   "played_at": 1793063980,
+   "duration": 266,
+   "playlist": "EDM",
+   "playlist_chain": null,
+   "playlist_source": "songs",
+   "streamer": "",
+   "is_request": false,
+   "song": {
+    "id": "ab65b3269b9fbb25ebf9927e40067231",
+    "art": "https://radio.seven-labs.com/api/station/labsfm/art/a4b9531a58f3f3bbecb287d3-1789243430.jpg",
+    "custom_fields": [],
+    "text": "S.P.Y - Sweet Sound - Sweet Sound",
+    "artist": "S.P.Y",
+    "title": "Sweet Sound",
+    "album": "Sweet Sound",
+    "genre": "",
+    "isrc": "",
+    "lyrics": ""
+   }
+  },
+  {
+   "sh_id": 14838,
+   "played_at": 1793063717,
+   "duration": 269,
+   "playlist": "EDM",
+   "playlist_chain": null,
+   "playlist_source": "songs",
+   "streamer": "",
+   "is_request": false,
+   "song": {
+    "id": "08b62f9d60ed38c85c7fac1d8a9403fe",
+    "art": "https://radio.seven-labs.com/api/station/labsfm/art/ccb2062f193ad2c88efb3c9e-1789243462.jpg",
+    "custom_fields": [],
+    "text": "Adventure Club - You Found Me - You Found Me",
+    "artist": "Adventure Club",
+    "title": "You Found Me",
+    "album": "You Found Me",
+    "genre": "",
+    "isrc": "",
+    "lyrics": ""
+   }
+  }
+ ],
+ "is_online": true,
+ "cache": null
+}

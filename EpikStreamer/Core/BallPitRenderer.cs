@@ -120,10 +120,12 @@ public sealed unsafe class BallPitRenderer : IDisposable
             // depth sort, far → near
             var order = alive.Select(b => (b, z: View(b.Pos).Z)).Where(x => x.z > 0.3f).OrderByDescending(x => x.z).ToList();
             _c.Flush();
+            _pulse = sc.BeatStrength > 0 ? sc.Pulse : 0;
             Spheres(order, t);
             Particles(sc, t);
             Overlays(order, s, t);
             if (s.ShowCount) Hud(sc.Balls.Count(b => !b.Leaving), sc.Waiting);
+            if (sc.RadioCard is { } rc) RadioCard(rc);
             _c.Flush();
         }
     }
@@ -198,7 +200,7 @@ public sealed unsafe class BallPitRenderer : IDisposable
             float scale = 1, alpha = 1;
             if (b.Leaving) { float u = (float)Math.Clamp((t - b.LeaveAt) / 0.45, 0, 1); scale = 1 + 0.35f * u; alpha = 1 - u; }
             else if (t - b.JoinedAt < 0.25) scale = (float)(0.4 + 0.6 * (t - b.JoinedAt) / 0.25);
-            float rho = _f * b.Radius * scale / z;
+            float rho = _f * b.Radius * scale * (1 + 0.08f * _pulse) / z;
             if (rho < 0.8f || sp.X + rho < 0 || sp.X - rho > Width || sp.Y + rho < 0 || sp.Y - rho > Height) continue;
             // view-space normal n=(nx,ny,nz) (nz toward camera) → world: right*nx + up*ny - fwd*nz → object: dot with each axis
             Vector3 Row(Vector3 ax) => new(Vector3.Dot(ax, _right), Vector3.Dot(ax, _up), -Vector3.Dot(ax, _fwd));
@@ -310,6 +312,60 @@ public sealed unsafe class BallPitRenderer : IDisposable
         using var tail = new SKPath(); tail.MoveTo(x - 7, rc.Bottom - 1); tail.LineTo(x + 7, rc.Bottom - 1); tail.LineTo(x, bottom); tail.Close(); _c.DrawPath(tail, p);
         p.Color = new SKColor(17, 24, 39, (byte)(255 * a)); _c.DrawText(msg, rc.Left + 10, rc.Bottom - 6 - (h - 12 - _font.Size * 0.75f) / 2, _font, p);
     }
+    float _pulse; SKBitmap? _art; string _artKey = "";
+    static string Fmt(double s) { var t = TimeSpan.FromSeconds(Math.Max(0, s)); return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss"); }
+    string Fit(SKFont f, string s, float w)
+    {
+        if (Measure(f, s) <= w) return s;
+        while (s.Length > 1 && Measure(f, s + "…") > w) s = s[..^1];
+        return s + "…";
+    }
+    /// <summary>Radio card, top-left: album art, ON AIR · station, title, artist, progress, up next, listeners.</summary>
+    void RadioCard(RadioCardInfo r)
+    {
+        _bold ??= new SKFont(SKTypeface.Default, 18); _font ??= new SKFont(SKTypeface.Default, 16);
+        float H = Math.Clamp(Height * 0.17f, 70, 200), W = Math.Clamp(Width * 0.42f, 260, 760), pad = H * 0.09f, x0 = 16, y0 = 16;
+        using var p = new SKPaint { IsAntialias = true, Color = new SKColor(10, 12, 24, 200) };
+        _c.DrawRoundRect(new SKRect(x0, y0, x0 + W, y0 + H), 14, 14, p);
+        float art = H - 2 * pad, tx = x0 + pad;
+        if (r.ArtKey != _artKey) { _art?.Dispose(); _art = null; _artKey = r.ArtKey; try { if (r.Art != null) _art = SKBitmap.Decode(r.Art); } catch { } }
+        var ar = new SKRect(tx, y0 + pad, tx + art, y0 + pad + art);
+        if (_art != null)
+        {
+            using var ip = new SKPaint { FilterQuality = SKFilterQuality.Medium, IsAntialias = true };
+            _c.Save(); using (var clip = new SKRoundRect(ar, 8, 8)) _c.ClipRoundRect(clip, antialias: true); _c.DrawBitmap(_art, ar, ip); _c.Restore();
+        }
+        else { p.Color = new SKColor(60, 70, 110); _c.DrawRoundRect(ar, 8, 8, p); p.Color = SKColors.White; _bold.Size = art * 0.5f; _c.DrawText("♪", ar.MidX - Measure(_bold, "♪") / 2, ar.MidY + art * 0.18f, _bold, p); }
+        tx += art + pad; float tw = x0 + W - pad - tx, y = y0 + pad;
+        // ON AIR · station  (+ listeners right-aligned)
+        _bold.Size = H * 0.13f; y += _bold.Size;
+        p.Color = r.Online ? new SKColor(239, 68, 68) : new SKColor(120, 120, 130);
+        _c.DrawCircle(tx + _bold.Size * 0.35f, y - _bold.Size * 0.35f, _bold.Size * (0.28f + 0.08f * _pulse), p);
+        var label = (r.Online ? "ON AIR" : "OFF AIR") + (r.Station.Length > 0 ? " · " + r.Station : "");
+        p.Color = new SKColor(250, 204, 21); float lx = tx + _bold.Size * 0.9f;
+        string lis = r.Listeners is int n ? $"{n} listening" : "";
+        _font.Size = H * 0.11f; float lw = lis.Length > 0 ? Measure(_font, lis) + pad : 0;
+        _c.DrawText(Fit(_bold, label, tw - (lx - tx) - lw), lx, y, _bold, p);
+        if (lis.Length > 0) { p.Color = new SKColor(203, 213, 225); _c.DrawText(lis, x0 + W - pad - Measure(_font, lis), y, _font, p); }
+        // title, artist
+        _bold.Size = H * 0.19f; y += _bold.Size * 1.15f; p.Color = SKColors.White;
+        _c.DrawText(Fit(_bold, r.Title.Length > 0 ? r.Title : "—", tw), tx, y, _bold, p);
+        _font.Size = H * 0.13f;
+        if (r.Artist.Length > 0) { y += _font.Size * 1.25f; p.Color = new SKColor(226, 232, 240); _c.DrawText(Fit(_font, r.Artist, tw), tx, y, _font, p); }
+        // progress + time
+        float by = y0 + H - pad - H * 0.04f, small = H * 0.10f; _font.Size = small;
+        if (r.Duration > 0)
+        {
+            var pos = r.PositionAt(DateTime.UtcNow); var tt = $"{Fmt(pos)} / {Fmt(r.Duration)}"; float ttw = Measure(_font, tt);
+            float bw = tw - ttw - pad; var track = new SKRect(tx, by - H * 0.035f, tx + bw, by);
+            p.Color = new SKColor(255, 255, 255, 60); _c.DrawRoundRect(track, 3, 3, p);
+            p.Color = new SKColor(250, 204, 21); _c.DrawRoundRect(new SKRect(track.Left, track.Top, track.Left + bw * (float)(pos / r.Duration), track.Bottom), 3, 3, p);
+            p.Color = new SKColor(203, 213, 225); _c.DrawText(tt, x0 + W - pad - ttw, by + 1, _font, p);
+            by -= H * 0.06f;
+        }
+        if (r.Next.Length > 0) { p.Color = new SKColor(148, 163, 184); _c.DrawText(Fit(_font, "Up next: " + r.Next, tw), tx, by - (r.Duration > 0 ? 2 : 0), _font, p); }
+    }
+
     void Hud(int n, int waiting)
     {
         _bold ??= new SKFont(SKTypeface.Default, 18); _bold.Size = Math.Clamp(Height / 34f, 12, 26);

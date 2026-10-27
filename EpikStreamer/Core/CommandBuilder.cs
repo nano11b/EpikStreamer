@@ -14,7 +14,8 @@ public static class CommandBuilder
     /// <summary>v2.2 live features of one encoder run. ControlPort 0 = no runtime control (azmq).</summary>
     public record LiveOptions(int ControlPort = 0, int MusicPort = 0, string? MicDevice = null, bool TextOverlays = false,
                               double MusicVolume = 0.25, double MicVolume = 1.0, double MainVolume = 1.0, bool Card = false,
-                              int BallPitPort = 0, string BallPitMode = "", int BallPitW = 0, int BallPitH = 0);
+                              int BallPitPort = 0, string BallPitMode = "", int BallPitW = 0, int BallPitH = 0,
+                              int RadioPort = 0, double RadioVolume = 0.35);
 
     /// <summary>v2.5 Ball Pit input: raw BGRA (premultiplied) frames the app renders and pushes over a local TCP socket.</summary>
     public static List<string> BallPitInputArgs(int port, int w, int h, int fps, FfmpegCaps? caps = null)
@@ -57,7 +58,7 @@ public static class CommandBuilder
     static string V(double v) => v.ToString("0.###", Inv);
 
     /// <summary>Audio chain: main [+ mic] → (sidechain) → [+ music, ducked] → normalization → 44.1k.</summary>
-    public static List<string> AudioGraph(Profile p, LiveOptions? lo, int musicIdx, int micIdx, FfmpegCaps? caps = null)
+    public static List<string> AudioGraph(Profile p, LiveOptions? lo, int musicIdx, int micIdx, FfmpegCaps? caps = null, int radioIdx = -1)
     {
         var c = caps ?? FfmpegCaps.All;
         var a = p.Audio; var f = new List<string>();
@@ -72,14 +73,24 @@ public static class CommandBuilder
             f.Add("[am][amic]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[avo]"); voice = "[avo]";
         }
         string mix = voice;
-        if (musicIdx >= 0)
+        // background bed: music feed and/or v2.6 radio (each with its own live volume), ducked under the voice together
+        string? bg = null;
+        if (musicIdx >= 0) { f.Add($"[{musicIdx}:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume@music={V(lo?.MusicVolume ?? a.MusicVolume)}[amu]"); bg = "[amu]"; }
+        if (radioIdx >= 0)
         {
-            f.Add($"[{musicIdx}:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume@music={V(lo?.MusicVolume ?? a.MusicVolume)}[amu]");
-            string mu = "[amu]";
-            if (a.Ducking && c.HasFilter("sidechaincompress"))
+            var rn = p.Radio.Normalize && c.HasFilter("loudnorm") ? "loudnorm=I=-20:TP=-2:LRA=11,aresample=48000," : "";
+            f.Add($"[{radioIdx}:a]aformat=sample_fmts=fltp:channel_layouts=stereo,{rn}volume@radio={V(lo?.RadioVolume ?? p.Radio.Volume)}[ara]");
+            if (bg == null) bg = "[ara]";
+            else { f.Add($"{bg}[ara]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[abg]"); bg = "[abg]"; }
+        }
+        if (bg != null)
+        {
+            string mu = bg;
+            bool duck = musicIdx >= 0 ? a.Ducking || (radioIdx >= 0 && p.Radio.Duck) : p.Radio.Duck;
+            if (duck && c.HasFilter("sidechaincompress"))
             {
                 f.Add($"{voice}asplit=2[avm][asc]"); voice = "[avm]";
-                f.Add($"[amu][asc]sidechaincompress@duck=threshold={V(Math.Clamp(a.DuckThreshold, 0.001, 1))}:ratio={V(Math.Clamp(a.DuckRatio, 1, 20))}:attack=20:release=500[amd]"); mu = "[amd]";
+                f.Add($"{bg}[asc]sidechaincompress@duck=threshold={V(Math.Clamp(a.DuckThreshold, 0.001, 1))}:ratio={V(Math.Clamp(a.DuckRatio, 1, 20))}:attack=20:release=500[amd]"); mu = "[amd]";
             }
             f.Add($"{voice}{mu}amix=inputs=2:duration=first:normalize=0:dropout_transition=0[amx]"); mix = "[amx]";
         }
@@ -217,7 +228,7 @@ public static class CommandBuilder
         return args;
     }
 
-    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1, FfmpegCaps? caps = null, int cardIdx = -1, int pitIdx = -1)
+    public static string EncoderGraph(Profile p, bool hasLogo, LiveOptions? lo = null, int musicIdx = -1, int micIdx = -1, FfmpegCaps? caps = null, int cardIdx = -1, int pitIdx = -1, int radioIdx = -1)
     {
         var o = p.Overlays; var f = new List<string>(); string cur = "[v0]";
         bool pitScale = lo != null && (lo.BallPitW != p.Width || lo.BallPitH != p.Height);
@@ -272,7 +283,7 @@ public static class CommandBuilder
         f.Add($"{cur}split=2[vs][pvs]");
         f.Add($"[vs]{EncoderFormat(p.Encoder)}[vout]");
         f.Add("[pvs]fps=1,scale=320:-2,format=yuvj420p[pv]");
-        f.AddRange(AudioGraph(p, lo, musicIdx, micIdx, caps));
+        f.AddRange(AudioGraph(p, lo, musicIdx, micIdx, caps, radioIdx));
         return string.Join(";", f);
     }
 
@@ -328,11 +339,13 @@ public static class CommandBuilder
         int musicIdx = -1, micIdx = -1;
         if (lo is { MusicPort: > 0 }) { a.AddRange(MusicInputArgs(lo.MusicPort, c)); musicIdx = next++; }
         if (!string.IsNullOrWhiteSpace(lo?.MicDevice)) { a.AddRange(MicInputArgs(lo.MicDevice!, c)); micIdx = next++; }
+        int radioIdx = -1;
+        if (lo is { RadioPort: > 0 }) { a.AddRange(MusicInputArgs(lo.RadioPort, c)); radioIdx = next++; }   // same raw-PCM TCP input as music
         int cardIdx = -1;
         if (lo is { Card: true }) { a.AddRange(NowPlayingCard.InputArgs()); cardIdx = next++; }
         int pitIdx = -1;
         if (lo is { BallPitPort: > 0 }) { a.AddRange(BallPitInputArgs(lo.BallPitPort, lo.BallPitW, lo.BallPitH, p.Fps, c)); pitIdx = next++; }
-        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx, c, cardIdx, pitIdx), "-map", "[vout]", "-map", "[aout]" });
+        a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx, c, cardIdx, pitIdx, radioIdx), "-map", "[vout]", "-map", "[aout]" });
         a.AddRange(VideoEncoderArgs(p, c));
         a.AddRange(new[] { "-c:a", "aac", "-b:a", p.AudioKbps + "k", "-ar", "44100", "-ac", "2" });
         if (dests.Count == 1 && !dests[0].IsRecording)

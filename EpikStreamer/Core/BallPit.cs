@@ -40,6 +40,13 @@ public class BallPitSettings
     public bool Active => Mode is "Source" or "Overlay";
 }
 
+/// <summary>v2.6 radio card drawn inside the Ball Pit (station, song, art, progress, up next, listeners).</summary>
+public sealed record RadioCardInfo(string Station, string Title, string Artist, string Next, int? Listeners,
+    double Elapsed, double Duration, DateTime AtUtc, byte[]? Art, string ArtKey, bool Online = true)
+{
+    public double PositionAt(DateTime utc) => Duration > 0 ? Math.Clamp(Elapsed + (utc - AtUtc).TotalSeconds, 0, Duration) : 0;
+}
+
 public sealed class Ball
 {
     public string Name = "", Key = "";
@@ -244,11 +251,35 @@ public sealed class BallPitScene
         b.AX = Vector3.Transform(b.AX, q); b.AY = Vector3.Transform(b.AY, q); b.AZ = Vector3.Transform(b.AZ, q);
     }
 
+    // ---- v2.6 radio: beat pulse + in-scene radio card ----
+    /// <summary>0 = off; 0..1 = how hard the balls bounce/pulse on beats of the radio.</summary>
+    public float BeatStrength { get; set; }
+    /// <summary>1 right after a detected beat, decays to 0 (renderer scales the balls slightly).</summary>
+    public float Pulse { get; private set; }
+    public int Beats { get; private set; }
+    public RadioCardInfo? RadioCard { get; set; }
+    float _fast, _slow, _beatPending; double _lastBeat = -10;
+    /// <summary>Feed the radio's loudness (one RMS value per ~20 ms chunk, 0..1). Cheap; called from the radio feed thread.</summary>
+    public void AudioLevel(float rms)
+    {
+        lock (Sync)
+        {
+            _fast += (rms - _fast) * 0.35f; _slow += (rms - _slow) * 0.02f;
+            if (BeatStrength > 0 && _fast > _slow * 1.3f + 0.015f && Time - _lastBeat > 0.28) { _lastBeat = Time; _beatPending = Math.Clamp((_fast - _slow) * 4, 0.35f, 1f); }
+        }
+    }
+
     /// <summary>Advances the simulation by <paramref name="dt"/> seconds (fixed sub-steps ≤ 1/120 s).</summary>
     public void Step(double dt)
     {
         lock (Sync)
         {
+            if (_beatPending > 0 && BeatStrength > 0)
+            {
+                float k = _beatPending * Math.Clamp(BeatStrength, 0, 1); Pulse = Math.Max(Pulse, k); Beats++;
+                foreach (var b in Balls) if (!b.Leaving && b.Pos.Y - b.Radius < 0.35f) b.Vel += new Vector3(Rand(-0.4f, 0.4f), (2.2f + Rand(0, 1.8f)) * k * 1.6f, Rand(-0.4f, 0.4f));
+            }
+            _beatPending = 0; Pulse = Math.Max(0, Pulse - (float)dt * 4);
             int n = Math.Max(1, (int)Math.Ceiling(dt * 120)); float h = (float)(dt / n);
             for (int i = 0; i < n; i++) SubStep(h);
             Time += dt;

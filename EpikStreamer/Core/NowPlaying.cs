@@ -23,7 +23,8 @@ public class NowPlayingSettings
     public string Label { get; set; } = "NOW PLAYING";
 }
 
-public record NowPlayingInfo(string Title, string RequestedBy, string UpNext, double Position, double Duration, string Thumb);
+public record NowPlayingInfo(string Title, string RequestedBy, string UpNext, double Position, double Duration, string Thumb,
+    string Label = "", string Sub = "", bool Radio = false);   // v2.6: radio variant (station label, artist line, square album art, LIVE when no duration)
 
 public static class NowPlayingCard
 {
@@ -48,7 +49,7 @@ public static class NowPlayingCard
     {
         var s = p.NowPlaying; var (W, H) = Size(p);
         int pad = Math.Max(6, H / 12), bar = s.ShowProgress ? Math.Max(4, H / 24) : 0;
-        int th = H - 2 * pad - bar, tw = hasThumb ? th * 16 / 9 : 0;
+        int th = H - 2 * pad - bar, tw = hasThumb ? (i.Radio ? th : th * 16 / 9) : 0;
         int tx = pad + (hasThumb ? tw + pad : 0);
         int fsLabel = Math.Max(10, H / 9), fsTitle = Math.Max(14, H / 5), fsSmall = Math.Max(10, H / 8);
         var a = new List<string> { "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
@@ -69,9 +70,10 @@ public static class NowPlayingCard
         if (s.ShowProgress)
         {
             chain.Add(dt(TimeFile, fsSmall, Hex(s.TextColor) + "@0.85", $"w-tw-{pad}", pad.ToString()));
+            if (i.Duration > 0 || !i.Radio) {
             double frac = i.Duration > 0 ? Math.Clamp(i.Position / i.Duration, 0, 1) : 0;
             chain.Add($"drawbox=x=0:y={H - bar}:w={W}:h={bar}:color=white@0.25:t=fill");
-            int bw = (int)Math.Round(W * frac); if (bw >= 1) chain.Add($"drawbox=x=0:y={H - bar}:w={bw}:h={bar}:color={Hex(s.AccentColor)}:t=fill");
+            int bw = (int)Math.Round(W * frac); if (bw >= 1) chain.Add($"drawbox=x=0:y={H - bar}:w={bw}:h={bar}:color={Hex(s.AccentColor)}:t=fill"); }
         }
         g.Add(cur + string.Join(",", chain) + ",format=rgba[out]");
         a.AddRange(new[] { "-filter_complex", string.Join(";", g), "-map", "[out]", "-frames:v", "1", "-update", "1", "-f", "image2", "-c:v", "png", outFile });
@@ -85,18 +87,18 @@ public static class NowPlayingCard
             "-frames:v", "1", "-update", "1", "-f", "image2", "-c:v", "png", outFile };
     }
 
-    public static string TimeText(NowPlayingInfo i) => i.Duration > 0 ? $"{LibraryItem.FormatTime(i.Position)} / {LibraryItem.FormatTime(i.Duration)}" : LibraryItem.FormatTime(i.Position);
+    public static string TimeText(NowPlayingInfo i) => i.Radio && i.Duration <= 0 ? "● LIVE" : i.Duration > 0 ? $"{LibraryItem.FormatTime(i.Position)} / {LibraryItem.FormatTime(i.Duration)}" : LibraryItem.FormatTime(i.Position);
     static string Clip(string s, int n) => s.Length <= n ? s : s[..(n - 1)] + "…";
 
     public static void WriteTexts(string dir, Profile p, NowPlayingInfo i)
     {
         var s = p.NowPlaying; var (W, H) = Size(p);
-        int fsTitle = Math.Max(14, H / 5), chars = Math.Max(12, (int)((W - (s.ShowThumbnail ? H * 16 / 9 : 0)) / (fsTitle * 0.55)));
+        int fsTitle = Math.Max(14, H / 5), chars = Math.Max(12, (int)((W - (s.ShowThumbnail ? (i.Radio ? H : H * 16 / 9) : 0)) / (fsTitle * 0.55)));
         var utf8 = new UTF8Encoding(false);
         void W1(string f, string t) => File.WriteAllText(Path.Combine(dir, f), t.Replace("\r", "").Replace("\n", " "), utf8);
-        W1(LabelFile, s.Label);
+        W1(LabelFile, i.Label.Length > 0 ? i.Label : s.Label);
         W1(TitleFile, Clip(i.Title, chars));
-        W1(SubFile, s.ShowRequester && i.RequestedBy.Length > 0 ? "Requested by " + Clip(i.RequestedBy, 30) : " ");
+        W1(SubFile, i.Sub.Length > 0 ? Clip(i.Sub, chars + 8) : s.ShowRequester && i.RequestedBy.Length > 0 ? "Requested by " + Clip(i.RequestedBy, 30) : " ");
         W1(NextFile, s.ShowUpNext && i.UpNext.Length > 0 ? "Up next: " + Clip(i.UpNext, chars + 8) : " ");
         W1(TimeFile, TimeText(i));
     }
