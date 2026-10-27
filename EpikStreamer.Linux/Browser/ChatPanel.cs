@@ -41,7 +41,7 @@ public class ChatPanel
     }
     public int QueuedReplies => _replies.Count;
     int _drainTick;
-    static Task Dispatch(Func<Task> f) => Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(f);
+    static Task Dispatch(Func<Task> f) => Avalonia.Application.Current == null ? Task.Run(f) : Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(f);   // no app (selftest) → thread pool
     /// <summary>Opt-in replies go to the command room (or the room the command came from in all-rooms mode). If that room isn't
     /// the one visible in the panel, the reply is queued until it is — or, with "allow switching room to reply", EpikChat briefly
     /// switches to it (clicks the room in its own room list) and back.</summary>

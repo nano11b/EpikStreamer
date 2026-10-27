@@ -155,7 +155,7 @@ static class SelfTest
                 lock (received) received.Add(new { user = m.User, text = m.Text, id = m.Id, room = m.Room, isBot = m.IsBot, self = m.Self });
                 if (m.User == "dave") onScreen = false;
                 if (m.Text == "!help" && !m.IsBot && !m.Self)   // stand-in for the command handler's reply path (ReplyAsync → SendChat(text, m.Room))
-                    Avalonia.Threading.Dispatcher.UIThread.Post(async () => { var r = await chat.SendChat($"Commands: !song !uptime ({m.User})", m.Room); lock (replies) replies[m.User] = r; P($"  reply to {m.User} in {m.Room}: {r}"); });
+                    _ = Task.Run(async () => { var r = await chat.SendChat($"Commands: !song !uptime ({m.User})", m.Room); lock (replies) replies[m.User] = r; P($"  reply to {m.User} in {m.Room}: {r}"); });
             };
             chat.ViewersReceived += (src, n) => { lock (viewers) viewers.Add(new { source = src, names = n.ToList() }); };
             chat.ObserverStatus += s => { lock (statuses) statuses.Add(s); P("  status: " + s); };

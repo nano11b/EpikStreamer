@@ -16,7 +16,8 @@ want = [('The_Bar_Alc_420', 'alice', '!help'), ('Lobby', 'dave', '!uptime'), ('M
 check(cmds == want, f'all-rooms mode: commands from 4 rooms (3 not visible) fire exactly once, in order, with their room: {cmds}')
 check(not any(m['user'].startswith('old') for m in M) and not any(m['user'] == 'bob' for m in M), 'sidebar-ack history and embeds never fire')
 check(any(m['isBot'] and m['user'] == 'EpikBot' for m in M) and any(m['self'] and m['user'] == 'MeStreamer' for m in M), 'bot (senderType) and own (senderId = userData.userId) messages flagged → never trigger')
-check(X['duplicates'] >= 1, 'the message seen by both DOM and tap was counted as a duplicate')
+switched = host and len(X['page'].get('switches') or []) > 0
+check(X['duplicates'] >= 1 or (switched and X['fromDom'] == 0), 'the message seen by both DOM and tap was counted as a duplicate' + (' (or, after reply room switches, only seen as DOM backlog)' if host else ''))
 check(X['reconnects'] >= 1, 'socket reconnect detected')
 S = [set(v['names']) for v in V if v['source'] == 'LiveViewers']
 check(len(S) >= 4 and S[0] == {'bob', 'carol'} and {'bob', 'carol', 'zed'} in S and {'carol', 'zed'} in S, 'viewers populate from the periodic viewers ACK: snapshot, join, leave')
