@@ -1,7 +1,7 @@
 namespace EpikStreamer.Core;
 
 /// <summary>A chat line read from the page. IsBot/Self: never answered (no loops, no bot ping-pong).</summary>
-public record ChatMessage(string User, string Text, string? Id = null, bool IsBot = false, bool Self = false, string Room = "", string Time = "");
+public record ChatMessage(string User, string Text, string? Id = null, bool IsBot = false, bool Self = false, string Room = "", string Time = "", string UserId = "");
 
 /// <summary>Chat command engine (pure; unit-tested). The host supplies live values via <see cref="Context"/>.</summary>
 public sealed class ChatCommands
