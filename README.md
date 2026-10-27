@@ -1,4 +1,4 @@
-# EpikStreamer 2.7.0
+# EpikStreamer 2.7.1
 
 Desktop app for Windows (WPF, .NET 8) and **Linux** (Avalonia, .NET 8; Debian/Ubuntu .deb or portable tar.gz) that streams local video files to RTMP ingests such as EpikChat's
 **Go live → RTMP encoder** (server `rtmp://media.epikchat.com:1935/x` + your stream key) using ffmpeg.
@@ -7,24 +7,24 @@ Defaults match EpikChat's cap: 1280x720, 30 fps, 2500 kbps video, 128 kbps AAC, 
 ## Downloads (GitHub Releases: https://github.com/nano11b/EpikStreamer/releases)
 | Package | Contents |
 |---|---|
-| `EpikStreamer-2.7.0-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
-| `EpikStreamer-v2.7.0-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
-| `EpikStreamer-v2.7.0-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
-| `epikstreamer_2.7.0_amd64.deb` / `epikstreamer_2.7.0_arm64.deb` | **Linux (Debian 12+, Ubuntu 22.04+, Mint, Raspberry Pi OS 64-bit).** Self-contained app (no .NET needed); ffmpeg, WebKitGTK and libsecret come from your distro. |
-| `epikstreamer-2.7.0-linux-amd64.tar.gz` / `-linux-arm64.tar.gz` | Portable Linux build for other distros. See `INSTALL-LINUX.txt` inside. |
+| `EpikStreamer-2.7.1-setup.exe` | **Recommended.** Per-user installer (no admin rights): installs to `%LOCALAPPDATA%\Programs\EpikStreamer` with the self-contained app and ffmpeg, Start-menu shortcut, optional desktop shortcut, uninstaller (Settings → Apps). Checks for the WebView2 Runtime. |
+| `EpikStreamer-v2.7.1-full-win-x64.zip` | Portable: self-contained `EpikStreamer.exe` (no .NET needed) + `ffmpeg\ffmpeg.exe`/`ffprobe.exe` (BtbN win64 GPL build: libx264, NVENC, QuickSync, AMF). Unzip and run. |
+| `EpikStreamer-v2.7.1-app-win-x64.zip` | Small framework-dependent `EpikStreamer.exe`. Needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). No ffmpeg: click **Download ffmpeg** in the app. |
+| `epikstreamer_2.7.1_amd64.deb` / `epikstreamer_2.7.1_arm64.deb` | **Linux (Debian 12+, Ubuntu 22.04+, Mint, Raspberry Pi OS 64-bit).** Self-contained app (no .NET needed); ffmpeg, WebKitGTK and libsecret come from your distro. |
+| `epikstreamer-2.7.1-linux-amd64.tar.gz` / `-linux-arm64.tar.gz` | Portable Linux build for other distros. See `INSTALL-LINUX.txt` inside. |
 
 ## Install on Linux
 Debian / Ubuntu / Mint / Raspberry Pi OS (pick `amd64` or `arm64`, see `dpkg --print-architecture`):
 ```
-wget https://github.com/nano11b/EpikStreamer/releases/download/v2.7.0/epikstreamer_2.7.0_amd64.deb
+wget https://github.com/nano11b/EpikStreamer/releases/download/v2.7.1/epikstreamer_2.7.1_amd64.deb
 sha256sum -c --ignore-missing SHA256SUMS-linux.txt     # optional, after downloading SHA256SUMS-linux.txt too
-sudo apt install ./epikstreamer_2.7.0_amd64.deb
+sudo apt install ./epikstreamer_2.7.1_amd64.deb
 epikstreamer        # or "EpikStreamer" in your applications menu
 ```
 Remove it with `sudo apt remove epikstreamer`. Your settings stay in `~/.config/EpikStreamer`.
 
 Other distros: install `ffmpeg`, WebKitGTK 4.1 (`webkit2gtk4.1` / `webkit2gtk-4.1`), `libsecret` and GTK 3, then
-`tar xzf epikstreamer-2.7.0-linux-amd64.tar.gz && ./epikstreamer-2.7.0/epikstreamer`.
+`tar xzf epikstreamer-2.7.1-linux-amd64.tar.gz && ./epikstreamer-2.7.1/epikstreamer`.
 
 Linux notes:
 - Hardware encoding: NVIDIA → NVENC (proprietary driver). Intel/AMD → VA-API: install `intel-media-va-driver` or `mesa-va-drivers`, and make sure your user is in the `render` group. **Auto-detect** on the Output / Encoder tab picks whichever works, falling back to x264.
@@ -45,10 +45,16 @@ Linux notes:
   Saved to `%APPDATA%\EpikStreamer\profiles.json`. Stream keys are saved only when **Remember keys** is ticked, and then it's encrypted with Windows DPAPI (CurrentUser). Otherwise it's kept in memory for the session only.
   A v1 `settings.json` is migrated into a profile named **Default**, and v2.0 profiles (one server + key) become a single EpikChat output.
 
+## New in 2.7.1
+- **Chat commands work in every room you're in.** The live feed now decodes EpikChat's real realtime protocol (socket.io with binary msgpack packets, verified from a signed-in capture), so `!help`, `!song`, requests etc. are seen in all joined rooms, not just the one on screen. The default **Command room** is now `*` (all rooms; settings from 2.7.0 that were blank are moved to `*` once). You can still type one room name.
+- **Replies go back to the room the command came from.** Turn them on or off with the **↩ Reply in chat** toggle on the chat panel's bar (Linux: the **↩ Reply** button next to 💬 Chat); the first time you open the chat panel you're asked "Reply to chat commands in chat? (posts as you)". Replies are always typed into EpikChat's own chat box (never sent over the socket) and stay rate-limited. For a room that isn't showing, the app switches to it through the sidebar, types the reply and switches back — **only while the chat panel is off screen**; while you're looking at it, the reply waits until that room is showing or the panel is hidden.
+- **Viewers list populates** from the periodic live-viewers update EpikChat's page already receives, and from the "Your live stream viewers" sidebar.
+- **Go live finishes by itself:** after reading the stream key the app clicks the **Done** button of EpikChat's "Connect your encoder" dialog (there is no other confirm step) and starts streaming. "Already live" is detected from the "Your live stream viewers" sidebar / **End live stream** button.
+
 ## New in 2.7.0
 - **Seamless chat:** chat commands, requests, Ball Pit jumps, alerts and the viewer list now work whichever EpikChat tab, room or panel is showing. You no longer need to keep "Viewing me" open or sit in the room you stream to. The 💬 Chat panel still has to be loaded and signed in.
   - **Live feed:** the app passively reads the chat and viewer events EpikChat's page already receives (read-only, it never sends anything) and merges them with the on-screen reader, so each message counts exactly once. If the live feed isn't recognized, it falls back to the on-screen reader. Settings → Chat shows which one is active ("Chat: live feed ✓" or "DOM fallback").
-  - **Command room:** blank = the room shown when you go live (default); `*` = all rooms you've joined; or type a room name.
+  - **Command room:** `*` = all rooms you've joined (default since 2.7.1); blank = the room shown when you go live; or type a room name.
   - **Viewer list fallback:** if no live viewer events arrive, the app re-reads the list the "Viewing me" panel uses, at most every 20 s.
   - **Replies** (still off by default) go to the command room. If another room is showing, they wait until you open it. **Allow switching room to reply** switches there briefly and back.
   - ⚠ EpikChat's realtime protocol isn't public, so the live feed recognizes events by their shape and has not yet been verified against the live site. **Chat diagnostics…** now includes a sanitized summary of event and field names (no text, names, tokens or cookies) to help tune it. Advanced: **Protocol map** overrides event names.

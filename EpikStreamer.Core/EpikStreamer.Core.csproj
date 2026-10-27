@@ -4,7 +4,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><AllowUnsafeBlocks>true</AllowUnsafeBlocks><ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>EpikStreamer</RootNamespace><AssemblyName>EpikStreamer.Core</AssemblyName>
-    <Version>2.7.0</Version><NoWarn>CA1416</NoWarn>
+    <Version>2.7.1</Version><NoWarn>CA1416</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../EpikStreamer/Core/*.cs" Link="Core/%(Filename)%(Extension)" />

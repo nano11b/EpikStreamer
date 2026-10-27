@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.7.1 — 2026-10-27
+Built against the protocol and page structure Sam captured from the signed-in site (2.7.0's live feed was a guess and never matched).
+### Fixed
+- **Commands didn't answer in the other rooms you're in (e.g. `!help`).** EpikChat's socket (`wss://ws.epikchat.com/chat`, Engine.IO v4) uses socket.io's **msgpack parser**: every packet is one binary frame, which 2.7.0 never decoded. The tap now decodes msgpack (maps, arrays, str, bin, ints, floats, nil, bool, timestamp ext in the 4/8/12-byte forms; ArrayBuffer and Blob frames, kept in order) and reads:
+  - `message` events (`content`, `senderName`, `targetId` room, `createdAt`); embeds, deleted and non-room messages are skipped; bots (`senderType: "bot"` / the chat-commands bot id) and your own messages (`senderId` = `connectionAccepted.userData.userId`) never trigger;
+  - room id → name from `connectionAccepted` favorites and the room lists in ACKs (`getSidebarData`, `resumeOpenApp`); message ids found in ACKs are history and never fire;
+  - `userUpdate` presence.
+  The tap stays passive: it wraps the page's own socket, decodes copies of incoming frames and of outgoing frames (only to pair ACK ids with event names), never inspects the CONNECT packet (it holds the chat token), and never sends or modifies anything.
+- **Command room defaults to all joined rooms (`*`)**; each reply goes to the command's own room. 2.7.0 settings with a blank command room are migrated once.
+- **Viewers list stayed empty.** The live-viewers list arrives as a periodic ACK (`{status, viewers, broadcastId, revision, viewerIds}`); it's recognized by shape (whatever the request is called — diagnostics name it), entries are mapped generically (id / username / displayName / picture / country), and changes feed the Viewers tab, alerts, Ball Pit and history. DOM fallback: the `aside` "Your live stream viewers" → region "Viewers" (empty when "No viewers yet").
+- **Go live didn't click the final "Done".** The real "Connect your encoder" dialog has no further confirm step: after reading the key the app clicks the dialog's own **Done** button exactly once and ffmpeg starts. Already-live detection uses the "Your live stream viewers" sidebar or the **End live stream** button (verified selectors, reported in diagnostics).
+### Added
+- **↩ Reply in chat** toggle on the chat panel's bar (Linux: **↩ Reply** next to 💬 Chat) and a one-time prompt "Reply to chat commands in chat? (posts as you)".
+- Room switching to reply is **on by default but only used while the chat panel is off screen** (no visible disruption); otherwise replies queue until that room is showing or the panel is hidden (max 20, 5 min). The sidebar room is matched by its exact accessible name. Replies are always typed into the page's composer, never emitted over the socket, and keep the existing rate limits.
+- Chat diagnostics: `verified: true`, protocol summary, decoded event names, ACK shapes (field names and value types only), the viewers request name, per-room decoded-message counters, decode errors. Still no message text, names, tokens or cookies.
+### Notes / caveats
+- The viewer row markup inside "Your live stream viewers" is unknown, so the DOM fallback reads rows generically; the socket ACK is the primary source.
+- The name of the request whose ACK carries the viewers wasn't captured; it's detected by shape and reported in diagnostics.
+- Linux: the chat panel is a separate window, so "on screen" means the 💬 Chat window is open; replies to other rooms then queue until it's closed or that room is showing (or turn on room switching while visible — `SwitchWhileVisible` in settings.json).
+### Tests
+- The fake server now speaks EIO4 + socket.io-msgpack binary with the captured shapes (timestamp ext, connectionAccepted favorites, sidebar ACK with other rooms, messages in Lobby / The_Bar_Alc_420 / Music while the UI shows Room B, viewers ACK poll with join/leave, server pings, a reconnect with history replay; ArrayBuffer on the first connection, Blob on the second).
+- Chrome (CDP) + router replay and the Linux WebKitGTK host check: each command fires once with its room, no self/bot triggers, viewers populate; on the host, `!help` in a non-visible room is queued while the panel is on screen and answered in its own room by switching once it's hidden, then switched back.
+- The go-live session mock now has the exact "Connect your encoder" dialog and live sidebar: Done is clicked exactly once (never the X / End live stream), and already-live detection is checked.
+
 ## 2.7.0 — 2026-10-27
 ### Added
 - **Seamless chat (live feed).** Chat commands, `!request`, Ball Pit jumps, alerts and the viewer list no longer depend on which EpikChat tab or panel is visible.

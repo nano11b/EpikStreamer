@@ -140,29 +140,37 @@ static class SelfTest
         {
             var line = await srv.StandardOutput.ReadLineAsync() ?? ""; var port = Regex.Match(line, @"PORT (\d+)").Groups[1].Value;
             var html = File.ReadAllText(Path.Combine(mockDir, "epikchat-tap.html")).Replace("<script src=\"chat-observer.js\"></script>", "").Replace("<script src=\"chat-tap.js\"></script>", "")
-                .Replace("const t0 = Date.now();", "const t0 = Date.now(); window.__holdMs = 4000;");
+                .Replace("<script src=\"msgpack-mini.js\"></script>", "<script>" + File.ReadAllText(Path.Combine(mockDir, "msgpack-mini.js")) + "</script>")
+                .Replace("const t0 = Date.now();", "const t0 = Date.now(); window.__holdMs = 9000;");
             var f = Tmp("tap.html", html);
             var received = new List<object>(); var viewers = new List<object>(); var statuses = new List<string>();
             var chat = new ChatPanel { ChatUrl = "file://" + f + "#port=" + port, DebugMessages = true, SelfName = "" };
-            chat.Feed.S = new ChatFeedSettings { CommandRoom = "Lobby", ViewersRestFallback = false };
-            chat.MessageReceived += m => { lock (received) received.Add(new { user = m.User, text = m.Text, id = m.Id, room = m.Room, isBot = m.IsBot, self = m.Self }); };
+            var fs = new ChatFeedSettings { ViewersRestFallback = false }; fs.Migrate();   // 2.7.1 defaults: all rooms, switching allowed
+            chat.Feed.S = fs;
+            bool onScreen = true;   // the chat panel starts on screen → replies to other rooms queue; "hidden" after dave's message
+            chat.OnScreen = () => onScreen;
+            var replies = new Dictionary<string, string>();
+            chat.MessageReceived += m =>
+            {
+                lock (received) received.Add(new { user = m.User, text = m.Text, id = m.Id, room = m.Room, isBot = m.IsBot, self = m.Self });
+                if (m.User == "dave") onScreen = false;
+                if (m.Text == "!help" && !m.IsBot && !m.Self)   // stand-in for the command handler's reply path (ReplyAsync → SendChat(text, m.Room))
+                    Avalonia.Threading.Dispatcher.UIThread.Post(async () => { var r = await chat.SendChat($"Commands: !song !uptime ({m.User})", m.Room); lock (replies) replies[m.User] = r; P($"  reply to {m.User} in {m.Room}: {r}"); });
+            };
             chat.ViewersReceived += (src, n) => { lock (viewers) viewers.Add(new { source = src, names = n.ToList() }); };
-            chat.ObserverStatus += s => { lock (statuses) statuses.Add(s); };
+            chat.ObserverStatus += s => { lock (statuses) statuses.Add(s); P("  status: " + s); };
             await chat.SetActive(true);
             var b = await Client();
-            string reply = "";
-            for (int i = 0; i < 40 && chat.Feed.VisibleRoom != "Room B"; i++) await Task.Delay(250);
-            reply = await chat.SendChat("Now playing: Test Song");          // command room Lobby is not visible → queued
             string title = "";
-            for (int i = 0; i < 80 && !title.Contains("\\\"done\\\""); i++) { await Task.Delay(500); title = await b.EvalAsync("chat", "document.title"); }
+            for (int i = 0; i < 90 && !title.Contains("\\\"done\\\""); i++) { await Task.Delay(500); title = await b.EvalAsync("chat", "document.title"); }
             var t = JsonSerializer.Deserialize<string>(title) ?? "";
             await Task.Delay(1500);   // let the 1 s flush timer run
             var tapDiag = await chat.TapDiagnostics();
-            object snap; lock (received) lock (viewers) lock (statuses)
-                snap = new { page = JsonDocument.Parse(t.StartsWith("{") ? t : "{}").RootElement, received = received.ToList(), viewers = viewers.ToList(), statuses = statuses.ToList(), reply, queued = chat.QueuedReplies,
+            object snap; lock (received) lock (viewers) lock (statuses) lock (replies)
+                snap = new { page = JsonDocument.Parse(t.StartsWith("{") ? t : "{}").RootElement, received = received.ToList(), viewers = viewers.ToList(), statuses = statuses.ToList(), replies = new Dictionary<string, string>(replies), queued = chat.QueuedReplies,
                     source = chat.Feed.SourceStatus(DateTime.Now), fromTap = chat.Feed.FromTap, fromDom = chat.Feed.FromDom, duplicates = chat.Feed.Duplicates, otherRoom = chat.Feed.OtherRoom, unmatched = chat.Feed.Unmatched, reconnects = chat.Feed.TapReconnects, tapDiag };
             File.WriteAllText(outFile, JsonSerializer.Serialize(snap));
-            P($"  tap selftest: page {t.Length} chars, C# received {received.Count} messages, {viewers.Count} viewer snapshots, reply '{reply}' → {outFile}");
+            P($"  tap selftest: page {t.Length} chars, C# received {received.Count} messages, {viewers.Count} viewer snapshots, {replies.Count} replies → {outFile}");
             await chat.SetActive(false);
             return t.StartsWith("{") ? 0 : 1;
         }

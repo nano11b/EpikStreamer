@@ -1,9 +1,9 @@
 ; EpikStreamer per-user installer (Inno Setup 6). Build with build-installer.ps1, or:
-;   ISCC.exe /DAppVersion=2.7.0 /DSourceDir=..\dist\full EpikStreamer.iss
+;   ISCC.exe /DAppVersion=2.7.1 /DSourceDir=..\dist\full EpikStreamer.iss
 ; Per-user (no admin): installs to %LOCALAPPDATA%\Programs\EpikStreamer. Profiles/keys in %APPDATA%\EpikStreamer are kept on uninstall.
 
 #ifndef AppVersion
-  #define AppVersion "2.7.0"
+  #define AppVersion "2.7.1"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\full"
