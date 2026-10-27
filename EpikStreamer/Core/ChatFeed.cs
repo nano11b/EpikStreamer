@@ -6,9 +6,23 @@ public class ChatFeedSettings
     /// <summary>Mirror EpikChat's own realtime connection (passive, read-only) so commands and viewers work whatever tab/panel is visible.</summary>
     public bool LiveFeed { get; set; } = true;
     /// <summary>"" = the room you stream to (auto-detected), "*" = all joined rooms, otherwise a room name.</summary>
-    public string CommandRoom { get; set; } = "";
-    /// <summary>Opt-in: briefly switch EpikChat to the command room to type a reply. Off = replies wait until that room is visible.</summary>
-    public bool AllowRoomSwitchToReply { get; set; }
+    public string CommandRoom { get; set; } = AllRooms;
+    /// <summary>Reply in the command's room by briefly switching EpikChat to it (sidebar room button → composer → back). On by default
+    /// since 2.7.1, but only done while the 💬 Chat panel isn't on screen (no visible disruption) unless <see cref="SwitchWhileVisible"/>;
+    /// otherwise the reply waits until that room is visible or the panel is hidden.</summary>
+    public bool AllowRoomSwitchToReply { get; set; } = true;
+    public bool SwitchWhileVisible { get; set; }
+    /// <summary>The first-run "Reply to chat commands in chat?" question was answered.</summary>
+    public bool ReplyPromptShown { get; set; }
+    /// <summary>Settings migration marker (0 = written by ≤2.7.0).</summary>
+    public int DefaultsVersion { get; set; }
+    /// <summary>2.7.1 defaults: all joined rooms, room switching on. Applied once to settings saved by 2.7.0 (whose blank = auto room).</summary>
+    public bool Migrate()
+    {
+        if (DefaultsVersion >= 271) return false;
+        if (CommandRoom.Length == 0) CommandRoom = AllRooms;
+        AllowRoomSwitchToReply = true; DefaultsVersion = 271; return true;
+    }
     /// <summary>Viewers fallback: repeat the viewer-list request EpikChat itself made (read-only, every ≥15 s) while no live viewer events arrive.</summary>
     public bool ViewersRestFallback { get; set; } = true;
     public int ViewersRestSeconds { get; set; } = 20;
@@ -37,6 +51,7 @@ public sealed class ChatFeedRouter
     /// <summary>The room the stream goes to: set when going live (the room the chat showed then), or by the host.</summary>
     public string StreamRoom { get; set; } = "";
     public string Self { get; set; } = "";
+    public string SelfDisplay { get; set; } = "";
     public string TargetRoom => S.CommandRoom is { Length: > 0 } c ? c : (StreamRoom.Length > 0 ? StreamRoom : VisibleRoom);
     public bool AllRooms => S.CommandRoom == ChatFeedSettings.AllRooms;
 
@@ -63,6 +78,14 @@ public sealed class ChatFeedRouter
     public TimeSpan PendingWait { get; set; } = TimeSpan.FromSeconds(2.5);
     public TimeSpan CrossSourceWindow { get; set; } = TimeSpan.FromSeconds(15);
 
+    /// <summary>v2.7.1: room id → name learned by the tap (connectionAccepted favorites, sidebar/room-list acks).</summary>
+    public void LearnRoom(string id, string name)
+    {
+        id = id?.Trim() ?? ""; name = name?.Trim() ?? ""; if (id.Length == 0 || name.Length == 0) return;
+        lock (_lk) { if (_roomById.Count < 5000) _roomById[id] = name; }
+        Flush(DateTime.Now);
+    }
+    public string RoomName(string id) { lock (_lk) return _roomById.TryGetValue(id, out var n) ? n : ""; }
     public void SetVisibleRoom(string room) { lock (_lk) VisibleRoom = room?.Trim() ?? ""; }
     /// <summary>Call when the stream starts: an auto command room becomes the room the chat is showing now.</summary>
     public void MarkStreamStart() { lock (_lk) if (StreamRoom.Length == 0) StreamRoom = VisibleRoom; }
@@ -116,14 +139,14 @@ public sealed class ChatFeedRouter
             if (m.Id != null && roomId.Length > 0) { _tapRoomOfId[m.Id] = roomId; if (_tapRoomOfId.Count > 3000) _tapRoomOfId.Clear(); }
             if (roomId.Length > 0 && m.Room.Length > 0) _roomById[roomId] = m.Room;
             else if (roomId.Length > 0 && m.Id != null && _domRoomOfId.TryGetValue(m.Id, out var dn)) _roomById[roomId] = dn;
-            if (Self.Length > 0 && Eq(m.User, Self)) m = m with { Self = true };
+            if (Self.Length > 0 && Eq(m.User, Self) || SelfDisplay.Length > 0 && Eq(m.User, SelfDisplay)) m = m with { Self = true };
             if (Seen(m.Id) || CrossDup(m, "tap", now)) { Duplicates++; Remember(m.Id); }
             else
             {
                 Remember(m.Id);
                 var room = m.Room.Length > 0 ? m.Room : (roomId.Length > 0 && _roomById.TryGetValue(roomId, out var n) ? n : "");
                 if (room.Length > 0) m = m with { Room = room };
-                if (AllRooms || TargetRoom.Length == 0 || Eq(room, TargetRoom) || Eq(roomId, TargetRoom)) { FromTap++; emit = m; }
+                if ((AllRooms && (room.Length > 0 || roomId.Length == 0)) || (!AllRooms && (TargetRoom.Length == 0 || Eq(room, TargetRoom) || Eq(roomId, TargetRoom)))) { FromTap++; emit = m; }
                 else if (room.Length > 0) OtherRoom++;
                 else _pending.Add((m, roomId, now));   // unknown room id: wait briefly for the DOM twin / a learned mapping
             }
@@ -143,7 +166,7 @@ public sealed class ChatFeedRouter
                 var (m, rid, at) = _pending[i];
                 string name = _roomById.TryGetValue(rid, out var n) ? n : "";
                 if (name.Length > 0) { if (AllRooms || Eq(name, TargetRoom)) { FromTap++; emit.Add(m with { Room = name }); } else OtherRoom++; _pending.RemoveAt(i--); }
-                else if (now - at > PendingWait) { Unmatched++; _pending.RemoveAt(i--); }
+                else if (now - at > PendingWait) { if (AllRooms) { FromTap++; emit.Add(m); } else Unmatched++; _pending.RemoveAt(i--); }
             }
         }
         foreach (var m in emit) Message?.Invoke(m);

@@ -13,6 +13,7 @@
         <ToggleButton x:Name="OverlayHideBtn" Content="🖼" Click="OverlayHide_Click"  ToolTip.Tip="Hide logo/text/clock overlays (live)"/>
         <Button Content="Mini" Click="Mini_Click" Classes="secondary"  ToolTip.Tip="Compact always-on-top player"/>
         <ToggleButton x:Name="ChatToggle" Content="💬 Chat" Click="ChatToggle_Click"  ToolTip.Tip="Show EpikChat chat (same signed-in session; never opens a second one)"/>
+        <ToggleButton x:Name="ReplyToggle" Content="↩ Reply" ToolTip.Tip="Reply to chat commands in chat (posts as you, in the room the command came from)"/>
         <Button Content="Check for updates" Click="CheckUpdates_Click" Classes="secondary"/>
         <Button x:Name="StartBtn" Content="▶ Start" Click="Start_Click" Background="#2E9E5B"/>
         <Button x:Name="SkipBtn" Content="⏭ Next" Click="Skip_Click" IsEnabled="False" Classes="secondary"/>

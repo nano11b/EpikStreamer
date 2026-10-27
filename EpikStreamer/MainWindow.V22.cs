@@ -229,7 +229,7 @@ public partial class MainWindow
     // ---------- chat commands + alerts ----------
     string? HandleChatCommand(ChatMessage m, ChatCommands.Context ctx) => _commands.Handle(m, ctx, DateTime.Now);
 
-    void ApplyChatPanelConfig() { var c = _store.Chat; _chat.SelfName = c.MyUsername; _chat.DebugMessages = c.DebugLog; _chat.ReplyMinIntervalSeconds = c.ReplyMinIntervalSeconds; _chat.Feed.S = c.Feed; }
+    void ApplyChatPanelConfig() { var c = _store.Chat; _chat.SelfName = c.MyUsername; _chat.DebugMessages = c.DebugLog; _chat.ReplyMinIntervalSeconds = c.ReplyMinIntervalSeconds; _chat.Feed.S = c.Feed; if (c.Feed.Migrate()) { Log("💬 chat commands now listen in all your rooms and reply in the room they came from (2.7.1 default)"); try { _store.Save(); } catch { } } InitReplyUi(); SyncReplyToggle(); }
 
     void OnChatMessage(ChatMessage m)
     {

@@ -561,6 +561,7 @@ public partial class MainWindow : Window
         ChatColumn.Width = on ? new GridLength(400) : new GridLength(0);
         ChatHost.Visibility = ChatSplitter.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
         await _chat.SetActive(on);
+        if (on) MaybeAskReplyPrompt();
     }
 
     void ShowChatStatus(int? viewers, bool live)

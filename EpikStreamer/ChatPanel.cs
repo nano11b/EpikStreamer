@@ -30,7 +30,7 @@ public class ChatPanel : DockPanel
     {
         Feed.Message += m => MessageReceived?.Invoke(m);
         Feed.Viewers += (s, n) => ViewersReceived?.Invoke(s, n);
-        _feedTimer = new(_ => { try { Feed.Flush(DateTime.Now); } catch { } }, null, 1000, 1000);
+        _feedTimer = new(_ => { try { Feed.Flush(DateTime.Now); if (_replies.Count > 0 && ++_drainTick % 3 == 0) _ = Dispatch(DrainQueue); } catch { } }, null, 1000, 1000);
     }
     void OnFeedStatus(string t)
     {
@@ -40,25 +40,55 @@ public class ChatPanel : DockPanel
         if (ready.Count > 0) _ = Task.Run(async () => { foreach (var x in ready) { var r = await SendChatNow(x); ObserverStatus?.Invoke("queued reply " + r); } });
     }
     public int QueuedReplies => _replies.Count;
+    int _drainTick;
+    Task Dispatch(Func<Task> f) => Dispatcher.InvokeAsync(f).Task.Unwrap();
     /// <summary>Opt-in replies go to the command room (or the room the command came from in all-rooms mode). If that room isn't
     /// the one visible in the panel, the reply is queued until it is — or, with "allow switching room to reply", EpikChat briefly
     /// switches to it (clicks the room in its own room list) and back.</summary>
+    /// <summary>Set by the main window: true while the 💬 Chat panel is actually on screen (switching rooms then would be visible).</summary>
+    public Func<bool>? OnScreen { get; set; }
+    readonly SemaphoreSlim _switchLock = new(1, 1);
+    bool CanSwitchNow => Feed.S.AllowRoomSwitchToReply && IsLoaded2 && (Feed.S.SwitchWhileVisible || !(OnScreen?.Invoke() ?? false));
     public async Task<string> SendChat(string text, string room = "")
     {
+        // all-rooms mode: the reply goes to the room the command came from — never guess the visible room
+        if (room.Length == 0 && Feed.AllRooms) return "skipped: the command's room isn't known";
         var target = room.Length > 0 ? room : Feed.TargetRoom;
-        var vis = Feed.VisibleRoom;
-        if (target.Length == 0 || vis.Length == 0 || string.Equals(target.Trim(), vis.Trim(), StringComparison.OrdinalIgnoreCase)) return await SendChatNow(text);
-        if (Feed.S.AllowRoomSwitchToReply && IsLoaded2)
+        if (target == Core.ChatFeedSettings.AllRooms) target = "";
+        await _switchLock.WaitAsync();
+        try
         {
-            if (await SwitchRoom(target))
+            var vis = Feed.VisibleRoom;
+            if (target.Length == 0 || vis.Length == 0 || string.Equals(target.Trim(), vis.Trim(), StringComparison.OrdinalIgnoreCase)) return await SendChatNow(text);
+            if (CanSwitchNow && await SwitchRoom(target))
             {
                 var r = await SendChatNow(text);
                 await Task.Delay(800); await SwitchRoom(vis);
                 return r + $" (switched to {target} briefly)";
             }
+            _replies.Enqueue(text, target, DateTime.Now);
+            return $"queued: waiting until {target} is visible" + (Feed.S.AllowRoomSwitchToReply ? " or the chat panel is off screen" : " in the chat panel");
         }
-        _replies.Enqueue(text, target, DateTime.Now);
-        return $"queued: waiting until {target} is visible in the chat panel" + (Feed.S.AllowRoomSwitchToReply ? " (switching failed)" : "");
+        finally { _switchLock.Release(); }
+    }
+    /// <summary>Delivers queued replies by switching rooms once the panel is off screen (called from the 1 s feed timer).</summary>
+    async Task DrainQueue()
+    {
+        if (_replies.Count == 0 || !CanSwitchNow || !await _switchLock.WaitAsync(0)) return;
+        try
+        {
+            var vis = Feed.VisibleRoom; if (vis.Length == 0) return;
+            foreach (var room in _replies.Rooms())
+            {
+                if (!CanSwitchNow) break;
+                bool here = string.Equals(room.Trim(), vis.Trim(), StringComparison.OrdinalIgnoreCase);
+                if (!here && !await SwitchRoom(room)) continue;
+                foreach (var t in _replies.TakeFor(room, DateTime.Now)) ObserverStatus?.Invoke("queued reply " + await SendChatNow(t) + (here ? "" : $" (switched to {room} briefly)"));
+                if (!here) { await Task.Delay(800); await SwitchRoom(vis); }
+            }
+        }
+        catch { }
+        finally { _switchLock.Release(); }
     }
     async Task<bool> SwitchRoom(string name)
     {
@@ -88,6 +118,9 @@ public class ChatPanel : DockPanel
     string? _scriptId;
     bool _initialized, _wantVisible;
     public bool Compact { get => _compact.IsChecked == true; set => _compact.IsChecked = value; }
+    readonly CheckBox _reply = new() { Content = "↩ Reply in chat", Margin = new Thickness(6, 4, 6, 4), ToolTip = "Reply to chat commands in chat (posts as you, in the room the command came from)" };
+    public event Action<bool>? ReplyToggled;
+    public bool ReplyInChat { get => _reply.IsChecked == true; set => _reply.IsChecked = value; }
     public bool IsInitialized2 => _initialized;
 
     public ChatPanel()
@@ -101,6 +134,8 @@ public class ChatPanel : DockPanel
         bar.Children.Add(reload);
         bar.Children.Add(new TextBlock { Text = "EpikChat", FontWeight = FontWeights.SemiBold, Margin = new Thickness(6, 4, 6, 4) });
         bar.Children.Add(_compact);
+        _reply.Click += (_, _) => ReplyToggled?.Invoke(_reply.IsChecked == true);
+        bar.Children.Add(_reply);
         DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(_note, Dock.Top);
         Children.Add(bar); Children.Add(_note); Children.Add(_web);
         WebViewHost.SignInActive += OnSignIn;

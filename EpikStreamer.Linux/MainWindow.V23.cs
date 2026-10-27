@@ -296,7 +296,7 @@ public partial class MainWindow
             Log($"🎵 {m.User}: {m.Text} → {reply}");
             var c = _store.Chat; bool live = _engine?.IsRunning == true;
             if (live) _engine!.ShowChatResponse(reply, c.OverlaySeconds);
-            if (c.ReplyInChat) _ = ReplyAsync(reply);
+            if (c.ReplyInChat) _ = ReplyAsync(reply, m.Room);
         }
         return true;
     }

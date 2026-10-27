@@ -94,7 +94,7 @@ public partial class MainWindow
         var r = _cur.Radio;
         if (_radio == null || !r.Active || !r.Requests || _radio.Target == null || !AzuraRequests.IsRequest(m.Text)) return false;
         if (m.IsBot || m.Self || (_store.Chat.MyUsername.Length > 0 && string.Equals(m.User, _store.Chat.MyUsername, StringComparison.OrdinalIgnoreCase))) return true;
-        var user = m.User.Trim(); var text = m.Text;
+        var user = m.User.Trim(); var text = m.Text; var room = m.Room;
         _ = Task.Run(async () =>
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -105,7 +105,7 @@ public partial class MainWindow
                 Log($"📻 {user}: {text} → {reply}");
                 var c = _store.Chat;
                 if (_engine?.IsRunning == true) _engine.ShowChatResponse(reply, c.OverlaySeconds);
-                if (c.ReplyInChat) _ = ReplyAsync(reply);
+                if (c.ReplyInChat) _ = ReplyAsync(reply, room);
             });
         });
         return true;

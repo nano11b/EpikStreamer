@@ -57,6 +57,18 @@ public static class ChatFeedBridge
                 else if (s == "closed") { router.TapSocketOpen = false; status?.Invoke("live feed socket closed (the page reconnects by itself)"); }
                 return true;
             }
+            case "epik-tap-rooms":
+            {
+                if (r.TryGetProperty("rooms", out var rs) && rs.ValueKind == JsonValueKind.Array)
+                    foreach (var x in rs.EnumerateArray().Take(2000)) if (x.ValueKind == JsonValueKind.Object) router.LearnRoom(Str(x, "id", 40), Str(x, "name", 100));
+                return true;
+            }
+            case "epik-tap-self":
+            {
+                var n = Str(r, "name", 60); var d = Str(r, "display", 60);
+                if (n.Length > 0) { router.Self = n; router.SelfDisplay = d; }
+                return true;
+            }
             case "epik-tap-members": case "epik-tap-stats":
                 return true;
         }

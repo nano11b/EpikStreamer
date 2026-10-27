@@ -560,6 +560,7 @@ public partial class MainWindow : Window
     async Task ShowChat(bool on)
     {
         await _chat.SetActive(on);
+        if (on) MaybeAskReplyPrompt();
     }
 
     void ShowChatStatus(int? viewers, bool live)
