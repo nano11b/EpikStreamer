@@ -39,7 +39,7 @@ License: see https://github.com/nano11b/EpikStreamer
 CR
   { echo "epikstreamer ($V) stable; urgency=medium"; echo; echo "  * See /opt/epikstreamer/CHANGELOG.md"; echo; echo " -- nano11b <nano11b@users.noreply.github.com>  $(date -R)"; } | gzip -9n > "$P/usr/share/doc/epikstreamer/changelog.gz"
   chmod 644 "$P/usr/share/doc/epikstreamer/"*
-  install -d "$P/usr/share/man/man1"; gzip -9n < "$HERE/epikstreamer.1" > "$P/usr/share/man/man1/epikstreamer.1.gz"; chmod 644 "$P/usr/share/man/man1/epikstreamer.1.gz"
+  install -d "$P/usr/share/man/man1"; sed "s/@VERSION@/$V/g" "$HERE/epikstreamer.1" | gzip -9n > "$P/usr/share/man/man1/epikstreamer.1.gz"; chmod 644 "$P/usr/share/man/man1/epikstreamer.1.gz"
   # third-party binary app in /opt with a bundled runtime: these lintian tags are expected
   cat > "$P/usr/share/lintian/overrides/epikstreamer" <<LO
 epikstreamer: dir-or-file-in-opt *

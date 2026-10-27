@@ -44,7 +44,7 @@ public partial class MainWindow
         _v23Timer.Tick += (_, _) => { _viewers.Tick(DateTime.Now); RefreshViewers(); RefreshNowText(); };
         _v23Timer.Start();
         RefreshRequests();
-        Init25(); Init26(); Init28();
+        Init25(); Init26(); Init28(); Init282();
         Closed += (_, _) => { _scanCts?.Cancel(); try { _library.Save(); } catch { } };
     }
 
@@ -284,10 +284,20 @@ public partial class MainWindow
         Persist(); LoadRequestSettings(); StatusText.Text = "Request settings saved.";
     }
     /// <summary>Handles !request/!sr/!queue/!skip/!wrongsong. Returns true if the message was a request command.</summary>
+    readonly Dictionary<string, DateTime> _lastNoPlaylistReply = new();
     bool HandleRequestCommand(ChatMessage m)
     {
         if (!_store.Requests.Enabled || !SongRequestQueue.IsRequestCommand(m.Text)) return false;
         if (m.IsBot || m.Self || (_store.Chat.MyUsername.Length > 0 && string.Equals(m.User, _store.Chat.MyUsername, StringComparison.OrdinalIgnoreCase))) return true;
+        if (_engine?.IsRunning == true ? _engine.PitOnly : SourceMode.PitOnly(_cur))
+        {   // 2.8.2: Ball Pit scene with no playlist — nothing to queue (radio requests, when on, were handled before this)
+            var why = SourceMode.NoPlaylistReply + (_cur.Radio.Active && !_cur.Radio.Requests ? " (radio requests are off)." : "");
+            if (_lastNoPlaylistReply.TryGetValue(m.Room, out var t0) && (DateTime.Now - t0).TotalSeconds < 30) return true;
+            _lastNoPlaylistReply[m.Room] = DateTime.Now;
+            Log($"🎵 {m.User}: {m.Text} → {why}");
+            if (_store.Chat.ReplyInChat) _ = ReplyAsync($"@{m.User} {why}", m.Room);
+            return true;
+        }
         var res = _requests.Handle(m, _library.Snapshot(), _engine?.OnAirItem ?? "", _engine?.TrackKey ?? "", _lastViewers ?? _viewers.PresentCount, DateTime.Now);
         if (res == null) return true;
         if (res.Skip && _engine?.IsRunning == true) { Log($"⏭ skipped by chat ({m.User}: {m.Text})"); _engine.Skip(); }

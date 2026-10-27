@@ -70,3 +70,5 @@ python3 rooms-check.py "$out/rooms.json"
 # v2.8 Engage: commands from several rooms → EngageEngine → replies posted through the composer in each source room
 "$B" --selftest-engage . "$out/engage.json"
 python3 engage-check.py "$out/engage.json"
+# v2.8.2: Start with an empty playlist, Ball Pit scene as the source, radio off (local file output)
+"$B" --selftest-pitonly "$out/pitonly.flv"

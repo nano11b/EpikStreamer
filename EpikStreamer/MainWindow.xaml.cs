@@ -27,7 +27,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        InitializeComponent();
+        InitializeComponent(); Title = Core.AppInfo.Title;
         foreach (var c in Enum.GetValues<Corner>()) { ImgCorner.Items.Add(c); TxtCorner.Items.Add(c); ClkCorner.Items.Add(c); NpCorner.Items.Add(c); }
         foreach (var (id, label) in FfmpegLocator.Encoders) EncoderCombo.Items.Add(new ComboBoxItem { Content = label, Tag = id });
         foreach (var t in CommandBuilder.Transitions) TransitionCombo.Items.Add(t);
@@ -293,9 +293,7 @@ public partial class MainWindow : Window
         var p = _cur;
         var playlistOverride = _playlistOverride; _playlistOverride = null;
         if (playlistOverride != null) { p = p.Clone(p.Name); p.Playlist = playlistOverride; }
-        if (p.Playlist.Count == 0 && p.BallPit.Mode != "Source") { Warn("Add at least one video to the playlist."); Tabs.SelectedIndex = 0; return; }
-        var missing = p.Playlist.Where(f => !File.Exists(f)).ToList();
-        if (missing.Count == p.Playlist.Count) { Warn("None of the playlist files exist."); return; }
+        if (SourceMode.StartProblem(p) is { } srcProblem) { Warn(srcProblem); Tabs.SelectedIndex = 0; return; }   // 2.8.2: Ball Pit source needs no files
         var dests = new List<CommandBuilder.Destination>(); var secrets = new List<string>(); var destNames = new List<string>();
         foreach (var o2 in p.Outputs.Where(x => x.Enabled))
         {
@@ -360,7 +358,7 @@ public partial class MainWindow : Window
             _chat.Feed.MarkStreamStart(); Log("💬 " + _chat.Feed.SourceStatus(DateTime.Now));
         }
         catch (Exception ex) { Warn("Could not start: " + ex.Message); _engine = null; _session = null; return; }
-        StartBtn.IsEnabled = false; StopBtn.IsEnabled = true; SkipBtn.IsEnabled = true;
+        StartBtn.IsEnabled = false; StopBtn.IsEnabled = true; SkipBtn.IsEnabled = _engine?.PitOnly != true;
         StatusText.Text = "Connecting…"; Tabs.SelectedItem = StatsTab;
         if (goLive != null && goLiveResult?.Outcome == LiveSession.Outcome.Created) _ = FinalizeGoLive(goLive);
         _previewTimer.Start();
@@ -570,7 +568,7 @@ public partial class MainWindow : Window
         SViewers.Text = viewers?.ToString() ?? "–";
         OnViewerCount(viewers);
         SLive.Text = ChatToggle.IsChecked != true ? "–" : live ? "🔴 LIVE" : "offline";
-        Title = "EpikStreamer 2.5.0" + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
+        Title = Core.AppInfo.Title + (live ? " — 🔴 LIVE" : "") + (viewers is int v ? $" · {v} viewer{(v == 1 ? "" : "s")}" : "");
     }
 
     // ---------- updates ----------

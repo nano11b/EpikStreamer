@@ -11,6 +11,8 @@ var FF = Environment.GetEnvironmentVariable("FFMPEG") ?? "/usr/bin/ffmpeg";
 if (mode == "ballpit") return BallPitTests.Unit();
 if (mode == "radio") return RadioTests.Unit();
 if (mode == "feed") return FeedTests.Run();
+if (mode == "pitonly") return PitOnlyTests.Unit();
+if (mode == "pitonly-encode") return PitOnlyTests.Encode(FF, dir, Environment.GetEnvironmentVariable("OUT") ?? $"{dir}/pit-radio-only.mp4", Environment.GetEnvironmentVariable("RADIO") != "0", double.Parse(Environment.GetEnvironmentVariable("SECS") ?? "30", System.Globalization.CultureInfo.InvariantCulture));
 if (mode == "engage") return EngageTests.Run();
 if (mode == "engagereplay") return EngageReplay.Run(args[1], args[2]);
 if (mode == "feedreplay") return FeedReplay.Run(args[1], args[2], args.Length > 3 ? args[3] : "");

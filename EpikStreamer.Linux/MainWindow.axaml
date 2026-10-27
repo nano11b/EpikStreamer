@@ -1,5 +1,5 @@
 <Window x:Class="EpikStreamer.MainWindow" xmlns="https://github.com/avaloniaui" xmlns:local="clr-namespace:EpikStreamer"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer 2.5.0" Width="1280" Height="760" MinWidth="820" MinHeight="600"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EpikStreamer" Width="1280" Height="760" MinWidth="820" MinHeight="600"
         Background="{DynamicResource Bg}" Icon="/Assets/icon.png">
   <Grid Margin="12">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -36,6 +36,10 @@
       <!-- SOURCE / PLAYLIST -->
       <TabItem Header="Source / Playlist">
         <DockPanel Margin="10">
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="Source" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox x:Name="SrcKind" Width="230" ToolTip.Tip="What the stream shows. Ball Pit scene = the Ball Pit tab's &quot;Source&quot; mode; no video files needed (audio from the Radio tab, or silence)."><ComboBoxItem Content="Playlist (video files)" Tag="Playlist"/><ComboBoxItem Content="Ball Pit scene" Tag="BallPit"/></ComboBox>
+          </StackPanel>
           <StackPanel DockPanel.Dock="Right" Width="130">
             <Button Content="Add files…" Click="AddFiles_Click"/>
             <Button Content="Remove" Click="RemoveFile_Click" Classes="secondary"/>
@@ -45,7 +49,7 @@
             <CheckBox x:Name="LoopCheck" Content="Loop playlist" Margin="6,14,0,4"/>
             <CheckBox x:Name="ShuffleCheck" Content="Shuffle" Margin="6,4,0,4"/>
           </StackPanel>
-          <TextBlock DockPanel.Dock="Bottom" Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Margin="0,6,0,0"
+          <TextBlock x:Name="SrcNote" DockPanel.Dock="Bottom" Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Margin="0,6,0,0"
                      Text="Files play back to back, gaplessly, over one connection. Each is scaled/padded to the output size and frame rate. Drag-and-drop files here too."/>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
             <TextBlock Text="Transition"/><ComboBox x:Name="TransitionCombo" Width="130"/>

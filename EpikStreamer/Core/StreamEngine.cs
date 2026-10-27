@@ -61,6 +61,8 @@ public sealed class StreamEngine
     public NowPlayingController? Card => _np;
     NowPlayingController? _np; volatile string _onAir = "", _upNext = ""; int _trackNo; double _onAirPos;
     public string OnAirItem => _onAir;
+    /// <summary>2.8.2: streaming the Ball Pit scene with no playlist (a looped silent filler is the timeline; no tracks, no skip).</summary>
+    public bool PitOnly { get; private set; }
     public string UpNextItem => _upNext;
     /// <summary>Changes whenever a new track starts (vote-skip votes are per track).</summary>
     public string TrackKey => _trackNo + "|" + _onAir;
@@ -182,13 +184,17 @@ public sealed class StreamEngine
     public void Start()
     {
         if (IsRunning) return;
+        PitOnly = false;
+        if (_p.BallPit.Mode == "Source" && !PitActive && !_p.Playlist.Any(File.Exists)) throw new InvalidOperationException("Ball Pit source is selected but the Ball Pit scene isn't available.");
         if (PitActive && _p.BallPit.Mode == "Source" && !_p.Playlist.Any(i => File.Exists(i) && Probe(i).HasVideo))   // empty, or only audio files
         {
+            PitOnly = !_p.Playlist.Any(File.Exists);
             var filler = MakeFiller();
             var json = System.Text.Json.JsonSerializer.Serialize(_p, ProfileStore.Json);
             _p = System.Text.Json.JsonSerializer.Deserialize<Profile>(json, ProfileStore.Json)!;
             _p.Playlist = new() { filler }; _p.LoopPlaylist = true; _p.Shuffle = false; _p.CrossfadeSeconds = 0;
-            Emit("● Ball Pit source: no video in the playlist, using a silent background (add music on the Audio tab).");
+            Emit(PitOnly ? "● Ball Pit source, no playlist: the scene is the picture; audio = " + (_p.Radio.Active ? "the radio" : "silence (radio off)") + (MusicActive ? " + music" : "") + "."
+                         : "● Ball Pit source: no video in the playlist, using a silent background (add music on the Audio tab).");
         }
         if (_p.Playlist.Count == 0) throw new InvalidOperationException("Playlist is empty.");
         if (_netDests.Count == 0 && !_p.RecordEnabled) throw new InvalidOperationException("No enabled output and recording is off.");
@@ -223,6 +229,7 @@ public sealed class StreamEngine
     /// <summary>Jump to the next item (hard cut). Note: up to a few seconds of already-rendered video still plays first.</summary>
     public void Skip()
     {
+        if (PitOnly) { Emit("Nothing to skip: the Ball Pit scene is the source (no playlist)."); return; }
         var onAir = OnAir(); var ps = _pumpSeg;
         if (onAir != null && ps != null && !ReferenceEquals(onAir, ps) && !(ps.Transition && onAir.Item == ps.Item && onAir.Idx == ps.Idx))
         { Emit("Next item is already starting."); return; }
@@ -682,7 +689,8 @@ public sealed class StreamEngine
     {
         var s = OnAir(); double t = _encTl0 + _outTime;
         string name = ""; int idx = 0, count = _p.Playlist.Count; double pos = 0;
-        if (s != null)
+        if (s != null && PitOnly) { name = "Ball Pit"; count = 0; }   // the filler is not a track: no now-playing/requests/history entries
+        else if (s != null)
         {
             idx = s.Idx; count = s.Order.Count; name = Path.GetFileName(s.Item); pos = s.SrcStart + (t - s.Tl0);
             if (s.Transition) name += " → " + Path.GetFileName(s.NextOrder[s.NextIdx]);

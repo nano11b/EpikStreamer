@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.8.2 — 2026-10-27
+### Added — stream with only the Ball Pit and the radio (no video files)
+- **Source selector** at the top of the Source / Playlist tab (Windows and Linux): *Playlist (video files)* or *Ball Pit scene*, with a note saying where the audio comes from (the Radio tab, or silence when the radio is off). It's the same setting as the Ball Pit tab's mode: choosing *Ball Pit scene* sets Mode = Source, choosing *Playlist* turns a Source pit off (an Overlay pit is kept), and changing the Ball Pit tab updates the selector.
+### Fixed — Start refused with an empty playlist even with the Ball Pit as the source
+- Root cause: Start's file check was `missing.Count == Playlist.Count`, which is true for 0 == 0, so an empty playlist always got "None of the playlist files exist." whatever the Ball Pit mode. The engine also threw "Playlist is empty" if the pit scene wasn't ready. The check now looks at the source: an empty playlist is fine with the Ball Pit scene (the hint names that option otherwise); if the scene isn't available the error says so.
+- With no playlist the engine plays an internal silent filler under the pit (live pacing unchanged from 2.6.1: no `-re`, wall-clock timestamps; the radio is mixed in when it's on, otherwise the track is silence, so EpikChat still gets audio). The filler is not a track: no now-playing, no history entry, no requests queue, and **Next** is disabled.
+- `!request` in Ball-Pit-only mode: the radio's requests handle it when enabled; otherwise the viewer gets "Song requests need a playlist — this stream is the Ball Pit scene only" (once per 30 s per room).
+- **Title bar showed "EpikStreamer 2.5.0"**: it's now read from the build at runtime. The Linux man page's version is filled in by the package build.
+### Tests
+- `pitonly` unit (selector sync, start checks, encoder args with no playlist + pit Source, radio on/off), `pitonly-encode` (30 s, pacing/lag, audio + video), Linux host `--selftest-pitonly` (Start with an empty playlist).
+
 ## 2.8.1 — 2026-10-27
 ### Fixed — chat commands from background rooms
 - **Commands typed in a joined room that isn't the active tab got no response** (e.g. Lobby active, `!help` in ImpulsiveThots). Root cause: the settings form was filled *before* the 2.7.1 chat-feed migration ran, so a 2.7.0-era blank "Command room" stayed in the box and was saved back on the next settings save (window close, alert test, hotkey apply) with the migration already marked done. Blank meant "auto = the room shown when going live", so messages from every other room were dropped as "other room". Now the migration runs before the form is filled, blank means **all joined rooms**, and settings already saved that way are repaired once (DefaultsVersion 281).

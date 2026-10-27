@@ -33,6 +33,7 @@ static class SelfTest
                 "--selftest-rooms" => await Rooms(args[1], args[2]),
                 "--selftest-engage" => await Engage(args[1], args[2]),
                 "--selftest-secret" => Secret_(),
+                "--selftest-pitonly" => PitOnly(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "epik-pitonly.flv")),
                 _ => Usage(),
             };
         }
@@ -230,6 +231,34 @@ static class SelfTest
     /// Lobby / Music / The_Bar / Room B, host poll + votes, !addpoints, games, !top) → router → EngageEngine → ReplyBatcher →
     /// ChatPanel.SendChat(text, room), which types into the mock page's composer after switching rooms. Writes the same record
     /// shape as `engagereplay` plus what the composer actually received.</summary>
+    /// <summary>2.8.2: Start with an empty playlist, the Ball Pit scene as the source and the radio off — the app's own start checks,
+    /// BallPitHost and StreamEngine, writing ~8 s to a local file (no real stream).</summary>
+    static int PitOnly(string outFile)
+    {
+        int f = 0; void C(bool ok, string w) { P((ok ? "PASS " : "FAIL ") + w); if (!ok) f++; }
+        var ff = EpikStreamer.Core.FfmpegLocator.Find("");
+        if (ff == null) { P("FAIL ffmpeg not found"); return 1; }
+        var p = new Profile { Name = "selftest-pitonly" }; p.Playlist.Clear();
+        C(SourceMode.StartProblem(p) != null, "playlist source + empty playlist is refused");
+        SourceMode.Set(p.BallPit, SourceMode.BallPit);
+        C(SourceMode.StartProblem(p) == null && SourceMode.PitOnly(p), "Ball Pit scene + empty playlist passes the start checks");
+        var dir = Path.Combine(Path.GetTempPath(), "epik-selftest-pit-" + Environment.ProcessId); Directory.CreateDirectory(dir);
+        using var pit = new BallPitHost(p.BallPit, Path.Combine(dir, "avatars"));
+        
+        try { File.Delete(outFile); } catch { }
+        var eng = new StreamEngine(p, ff, new[] { new CommandBuilder.Destination("File", outFile) }, Array.Empty<string>(), Path.Combine(dir, "work")) { BallPit = pit.Scene };
+        var log = new System.Text.StringBuilder(); eng.Log += l => { lock (log) log.AppendLine(l); };
+        long frames = 0; eng.Stats += st => frames = st.Frames;
+        try { eng.Start(); } catch (Exception ex) { C(false, "Start threw: " + ex.Message); return f; }
+        C(eng.PitOnly, "engine is running pit-only");
+        Thread.Sleep(8000); eng.Stop(); C(eng.Wait(20000), "engine stopped");
+        C(log.ToString().Contains("silence (radio off)"), "audio = silence with the radio off");
+        C(frames > 150 && File.Exists(outFile) && new FileInfo(outFile).Length > 50_000, $"frames encoded ({frames}) to {outFile}");
+        try { Directory.Delete(dir, true); } catch { }
+        P(f == 0 ? "PITONLY SELFTEST PASSED" : $"{f} FAILED");
+        return f;
+    }
+
     static async Task<int> Engage(string mockDir, string outFile)
     {
         var srv = new System.Diagnostics.Process { StartInfo = new("node", $"\"{Path.Combine(mockDir, "ws-server.js")}\" 0 150 engage") { RedirectStandardOutput = true, UseShellExecute = false } };
