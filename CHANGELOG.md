@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.6.1 — 2026-10-26
+### Fixed
+- **Ball Pit + Radio falling behind real time** (ffmpeg log flooded with `Resumed reading at pts … with rate 1.050 after a lag of N s`, stream lagging and stuttering). Root cause: with the Ball Pit on, the encoder mixed two `-re` (readrate) inputs, the playlist pipe and the now-playing card PNG, with live TCP inputs (Ball Pit frames, radio audio) that already run at wall-clock speed. On ffmpeg 8 / master (the bundled BtbN build), the scheduler lets the `-re` inputs fall further behind and the whole graph gets throttled to about 0.5–0.65x. Measured: 0.63x, with lag growing about 0.35 s every second. The Ball Pit feeder made it worse: when it was blocked writing to ffmpeg, its catch-up logic advanced the frame counter without sending frames, so the timeline was lost for good.
+  - With a live Ball Pit input, `-re` is no longer used: the live input sets the pace.
+  - Ball Pit frames are stamped with wall-clock timestamps (`-use_wallclock_as_timestamps 1`), and the feeder is paced to exactly 30 fps. Frames it has to skip become repeated frames instead of a slower timeline.
+  - With the Ball Pit on, the now-playing card is drawn straight into the Ball Pit frames in C#, so there is no extra PNG input or overlay in ffmpeg.
+  - The radio input gets `aresample=async` to absorb jitter.
+### Added
+- **Pace watchdog / automatic Ball Pit quality** (Ball Pit → Auto quality, on by default). If the encoder can't keep up, it degrades step by step and the log/state show "Encoder can't keep up — lowering Ball Pit quality…". The trigger is any of: recent speed below 0.97x for 15 s, the "Resumed reading" lag growing, or more than 10 % of Ball Pit frames dropped. The steps are: draw every 2nd frame (the stream stays at 30 fps), then lower the render size down to 50 % (short encoder restart). If even that isn't enough, a one-time hint suggests a lower resolution/fps or the hardware encoder.
+  - The renderer also switches itself to every-2nd-frame when the PC can't draw 30 fps.
+### Changed
+- **AMD (h264_amf):** low-latency/speed preset with no B-frames, and the bitrate is capped at 2.5 Mbps (EpikChat's cap).
+- Tests: new `pace` real-time soak test (Source/Overlay, card, any ffmpeg, CPU-throttle mode). Unit checks were added for the new arguments.
+
 ## 2.6.0 — 2026-10-26
 ### Added
 - **Radio** (new tab): background music from an internet radio station, made for the Ball Pit but it works in every mode.
