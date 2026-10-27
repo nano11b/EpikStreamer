@@ -1,0 +1,61 @@
+// Unit test of Web/chat-tap.js decoding/classification across plausible realtime framings (node, no browser).
+const fs = require('fs'), vm = require('vm');
+const src = fs.readFileSync(__dirname + '/../../EpikStreamer/Web/chat-tap.js', 'utf8');
+function load(cfg) {
+  const out = [];
+  const win = { __EPIK_TAP_CFG: cfg || {}, chrome: { webview: { postMessage: m => out.push(m) } }, location: { href: 'https://www.epikchat.com/chat', origin: 'https://www.epikchat.com' }, document: { visibilityState: 'visible' } };
+  win.window = win;
+  const ctx = vm.createContext(Object.assign(win, { URL, TextDecoder, setInterval: () => 0, setTimeout, console, XMLHttpRequest: function () { }, JSON, Date, Math, RegExp, Map, Set, Object, Array, String, Number }));
+  ctx.XMLHttpRequest.prototype.open = function () { }; ctx.XMLHttpRequest.prototype.send = function () { };
+  vm.runInContext(src, ctx);
+  return { win, out, feed: s => win.__epikTapHandle(typeof s === 'string' ? s : JSON.stringify(s)) };
+}
+let fails = 0; const check = (ok, what) => { console.log((ok ? 'PASS ' : 'FAIL ') + what); if (!ok) fails++; };
+const msgs = o => o.out.filter(m => m.type === 'epik-chat');
+
+// 1. socket.io v4
+let t = load();
+t.feed('0{"sid":"x","pingInterval":25000}'); t.feed('40'); t.feed('2');
+t.feed('42["message:new",{"_id":"6721aaaaaaaaaaaaaaaaaaa1","roomId":"r1","roomName":"Lobby","user":{"username":"alice"},"text":"!song","createdAt":"2026-10-27T10:00:00Z"}]');
+t.feed('42["typing",{"roomId":"r1","user":{"username":"bob"}}]');
+t.feed('42["message:new",{"_id":"6721aaaaaaaaaaaaaaaaaaa1","roomId":"r1","user":{"username":"alice"},"text":"!song"}]');   // repeat frame
+let m = msgs(t);
+check(m.length === 1 && m[0].user === 'alice' && m[0].text === '!song' && m[0].roomId === 'r1' && m[0].room === 'Lobby' && m[0].source === 'tap', 'socket.io: message parsed once (room id+name, typing ignored)');
+// 2. {type,data} plain JSON with nested message + envelope room
+t = load();
+t.feed({ type: 'chat.message', data: { room: { id: 'r2', name: 'Room B' }, message: { id: 'm2', author: { displayName: 'Bob', isBot: true }, body: 'hi <b>there</b>', ts: 1793000000 } } });
+m = msgs(t); check(m.length === 1 && m[0].isBot && m[0].text === 'hi there' && m[0].roomId === 'r2' && m[0].room === 'Room B' && /^20/.test(m[0].time), '{type,data}: nested message, envelope room, bot flag, html stripped, epoch time');
+// 3. Phoenix + Centrifugo
+t = load();
+t.feed(['1', '5', 'room:r3', 'new_msg', { id: 'p1', user: 'carol', text: '!uptime' }]);
+t.feed({ push: { channel: 'chat:r4', pub: { data: { id: 'c1', sender: { nick: 'dave' }, content: '!help' } } } });
+m = msgs(t); check(m.length === 2 && m[0].roomId === 'room:r3' && m[1].roomId === 'chat:r4' && m[1].user === 'dave', 'Phoenix and Centrifugo framings (topic as room)');
+// 4. history batches are backlog
+t = load();
+t.feed({ event: 'room:history', payload: { messages: [{ id: 'h1', user: 'x', text: 'old' }, { id: 'h2', user: 'y', text: '!song' }] } });
+t.feed({ event: 'messages', payload: [1, 2, 3, 4].map(i => ({ id: 'b' + i, user: 'u' + i, text: 'old ' + i })) });
+t.feed({ event: 'message', payload: { id: 'h2', user: 'y', text: '!song' } });   // same id later: already seen
+check(msgs(t).length === 0, 'history / big batches never become new messages (ids remembered)');
+// 5. viewers
+t = load();
+t.feed('42["stream:viewer_joined",{"streamId":"s1","user":{"username":"zed"}}]');
+t.feed('42["stream:viewer_left",{"streamId":"s1","user":{"username":"bob"}}]');
+t.feed('42["stream:viewers",{"viewers":[{"username":"carol"},{"username":"zed"}]}]');
+t.feed({ type: 'presence.join', data: { roomId: 'r1', user: { username: 'eve' } } });
+const v = t.out.filter(x => x.type === 'epik-tap-viewers').map(x => x.op + ':' + x.names.join(','));
+check(JSON.stringify(v) === JSON.stringify(['join:zed', 'leave:bob', 'snapshot:carol,zed']), 'viewer join / leave / list events: ' + v.join(' '));
+check(t.out.some(x => x.type === 'epik-tap-members' && x.op === 'join' && x.name === 'eve' && x.roomId === 'r1'), 'room membership event (presence.join)');
+// 6. map override
+t = load({ map: { messageEvents: '^zz$', eventField: 'k', payloadField: 'v', text: 'q', user: 'w', id: 'n' } });
+t.feed({ k: 'zz', v: { n: 'o1', w: 'frank', q: '!song' } });
+t.feed({ k: 'chat', v: { n: 'o2', w: 'gina', q: '!song' } });
+m = msgs(t); check(m.length === 1 && m[0].user === 'frank', 'CFG.map overrides event name and field paths');
+// 7. diagnostics sanitized
+t = load();
+t.feed('42["message:new",{"_id":"d1","roomId":"r1","user":{"username":"secretuser"},"text":"secret text","token":"abc.def.ghi"}]');
+const dg = JSON.stringify(t.win.__epikTapDiag());
+check(!/secretuser|secret text|abc\.def/.test(dg) && /message:new/.test(dg) && /"username":"string"/.test(dg) && /"verified":false/.test(dg), 'diagnostics: event names + field names/types only (no values)');
+// 8. junk never throws
+t = load(); for (const j of ['', '3', '{bad', '42[bad', '[]', 'null', '42["x"]', '{"type":"message","data":null}']) t.feed(j);
+check(msgs(t).length === 0, 'malformed frames ignored');
+console.log(fails ? fails + ' FAILED' : 'TAP UNIT PASSED'); process.exit(fails ? 1 : 0);
