@@ -93,7 +93,7 @@ static class FeedReplay
             ChatFeedBridge.Handle(m, type, r, now, status.Add);
         }
         r.Flush(now.AddSeconds(5));
-        File.WriteAllText(outFile, System.Text.Json.JsonSerializer.Serialize(new { messages = msgs, viewers = views, status, source = r.SourceStatus(now), r.FromTap, r.FromDom, r.Duplicates, r.OtherRoom, r.Unmatched, r.TapReconnects }));
+        File.WriteAllText(outFile, System.Text.Json.JsonSerializer.Serialize(new { messages = msgs, viewers = views, status, source = r.SourceStatus(now), fromTap = r.FromTap, fromDom = r.FromDom, duplicates = r.Duplicates, otherRoom = r.OtherRoom, unmatched = r.Unmatched, reconnects = r.TapReconnects }));
         Console.WriteLine($"replayed → {outFile}: {msgs.Count} messages, {views.Count} viewer snapshots");
         return 0;
     }

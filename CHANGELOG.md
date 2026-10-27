@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.7.0 — 2026-10-27
+### Added
+- **Seamless chat (live feed).** Chat commands, `!request`, Ball Pit jumps, alerts and the viewer list no longer depend on which EpikChat tab or panel is visible.
+  - A small script runs at document start in the 💬 Chat panel. It wraps the page's own `WebSocket` / `EventSource` (and peeks at viewer-list `fetch`/XHR responses) and **passively mirrors incoming events** to the app. It is read-only: it never sends, modifies or opens connections.
+  - Events are recognized by shape (socket.io/engine.io, Phoenix, Centrifugo, `[event, payload]` and `{type, data}` envelopes). Message, history/backlog, viewer join/leave/list and member events are classified. History and backlog never fire commands.
+  - A router merges the live feed with the existing on-screen (DOM) reader. Messages are deduplicated by id (and by user + text within 15 s across sources), so each fires exactly once, including when the socket reconnects and replays history.
+- **Command room** setting: auto (the room shown when you go live, the default), all joined rooms (`*`), or a named room. Messages from other rooms are ignored, including the room you happen to be looking at.
+- **Viewer list without "Viewing me"**: viewers come from live join/leave/list events. Optional fallback (on by default): when no live viewer events arrive for 60 s, the app re-requests the same-origin list the panel uses, read-only, at most every 20 s (minimum 15 s), only while the page is visible.
+- **Reply routing** (replies are still off by default): a reply goes to the room the command came from. If that room isn't showing, it's queued (max 20, 5 min) and posted when you open it. Opt-in **Allow switching room to reply** clicks the room in EpikChat's room list, replies, and switches back.
+- **Source indicator** in Settings → Chat: "Chat: live feed ✓ (room[, viewers live])" or "Chat: DOM fallback — only the visible room".
+- **Diagnostics:** Chat diagnostics… now adds a `tap` section (event names, counts, field names and value types only; no message text, names, tokens or cookies) and the feed counters. Advanced **Protocol map** (JSON regex overrides for event names) lets the feed be tuned without a new release.
+### Notes / caveats
+- **The EpikChat realtime protocol is unverified.** The chat app's code is only served after sign-in, and per the instructions nothing was signed in to or connected to. The parser was built from general knowledge of common realtime formats, plus EpikChat's public developer policy (which confirms WebSocket real-time events) and its public Next.js bundle (auth only). If the live feed doesn't recognize the real events, the indicator shows "DOM fallback" and everything works as in 2.6.1.
+- A live-feed message whose room is known only by id is matched to a room name once it's learned (from a frame carrying the name, or the same message on screen). Until then it waits for 2.5 s and is then dropped and counted as "unmatched" in diagnostics.
+- Room switching for replies depends on EpikChat's room list markup and is unverified.
+### Tests
+- New: `feed` (router and reply-queue unit tests) and `tap-unit.js` (decoder and classifier in node).
+- New: a fake local WebSocket server (`ws-server.js`, inferred socket.io-style protocol) with a mock page. The UI shows Room B, the command room is Lobby and the viewers panel is never opened. The scenario covers backlog, other-room traffic, viewer join/leave, a server-side disconnect with history replay plus a duplicate resend, then a room switch where DOM and feed both see a message.
+  - It runs in headless Chrome over CDP (`run-tap-mock.sh`, replayed through the app's router) and through the Linux WebKitGTK host (`--selftest-tap`, the real ChatPanel). Both check that commands fire exactly once, viewers populate, there are no duplicates and the reconnect recovers. On Linux the test also checks that the reply is queued and posted after the switch.
+
 ## 2.6.1 — 2026-10-26
 ### Fixed
 - **Ball Pit + Radio falling behind real time** (ffmpeg log flooded with `Resumed reading at pts … with rate 1.050 after a lag of N s`, stream lagging and stuttering). Root cause: with the Ball Pit on, the encoder mixed two `-re` (readrate) inputs, the playlist pipe and the now-playing card PNG, with live TCP inputs (Ball Pit frames, radio audio) that already run at wall-clock speed. On ffmpeg 8 / master (the bundled BtbN build), the scheduler lets the `-re` inputs fall further behind and the whole graph gets throttled to about 0.5–0.65x. Measured: 0.63x, with lag growing about 0.35 s every second. The Ball Pit feeder made it worse: when it was blocked writing to ffmpeg, its catch-up logic advanced the frame counter without sending frames, so the timeline was lost for good.
