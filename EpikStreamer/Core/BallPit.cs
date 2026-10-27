@@ -9,6 +9,8 @@ public class BallPitSettings
 {
     public string Mode { get; set; } = "Off";          // Off | Source (replaces the video) | Overlay (transparent, on top of the playlist)
     public double RenderScale { get; set; } = 1.0;     // render at a fraction of the output size (ffmpeg scales up); 0.5..1
+    /// <summary>v2.6.1: lower the Ball Pit load automatically when the encoder falls behind real time.</summary>
+    public bool AutoQuality { get; set; } = true;
     public int MaxBalls { get; set; } = 200;           // hard cap 300; extra people wait for a free slot
     public double BallSize { get; set; } = 0.6;        // radius in room units (room is 16 × 10)
     public double Gravity { get; set; } = 14;          // units/s²

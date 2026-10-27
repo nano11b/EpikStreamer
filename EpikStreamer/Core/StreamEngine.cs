@@ -173,7 +173,9 @@ public sealed class StreamEngine
     void StartPitFeed(int port, int w, int h, bool transparent)
     {
         int gen = Interlocked.Increment(ref _pitGen);
-        var feed = new BallPitFeed(BallPit!, w, h, _p.Fps, transparent); feed.Log += Emit; PitFeed = feed;
+        _pitHalfRate |= PitFeed?.HalfRate == true;   // keep a degrade the previous feed chose by itself across encoder restarts
+        var feed = new BallPitFeed(BallPit!, w, h, _p.Fps, transparent) { HalfRate = _pitHalfRate }; feed.Log += Emit; PitFeed = feed;
+        if (_np != null) { feed.CardPath = Path.Combine(WorkDir, NowPlayingCard.CardFile); feed.CardCorner = _p.NowPlaying.Corner; feed.CardScale = (double)w / Math.Max(1, _p.Width); }
         new Thread(() => feed.Run(port, () => gen == _pitGen && !_stop)) { IsBackground = true, Name = "ball pit feed", Priority = ThreadPriority.AboveNormal }.Start();
     }
 
@@ -401,6 +403,11 @@ public sealed class StreamEngine
                 }
                 // encoder died unexpectedly (connection dropped, server closed, every destination failed, ...)
                 KillFeeder();
+                if (_plannedRestart)
+                {   // v2.6.1 auto-degrade: restart at once with the smaller Ball Pit frame, no backoff, not counted as a failure
+                    _plannedRestart = false; try { _enc?.WaitForExit(3000); } catch { }
+                    ComputeResume(); _reconnects++; continue;
+                }
                 try { _enc?.WaitForExit(3000); Emit($"Encoder exited unexpectedly (code {SafeExit(_enc)})."); } catch { }
                 int? code = null; try { if (_enc is { HasExited: true }) code = _enc.ExitCode; } catch { }
                 if (!_stop && IsFatalOptionError(code, _encProgress, _encFatal))
@@ -447,6 +454,82 @@ public sealed class StreamEngine
         }
     }
 
+    // ---- v2.6.1 real-time watchdog + Ball Pit auto-degrade ----
+    static readonly Regex ResumedLag = new(@"\[(\w+#\d+:\d+)/\w+ @[^\]]*\] Resumed reading at pts [\d.]+ .*after a lag of ([\d.]+)s", RegexOptions.Compiled);
+    /// <summary>Speed / lag tracker of the current encoder run.</summary>
+    public sealed class PaceMonitor
+    {
+        public readonly Stopwatch Run = new(); public int LagLines; public double SlowSince = -1, LastAction = -1e9;
+        readonly Dictionary<string, List<(double t, double lag)>> _lags = new();
+        readonly List<(double t, long written, long skipped)> _feed = new();
+        readonly List<(double t, double outT)> _out = new();
+        /// <summary>Real speed over the last ~10 s (ffmpeg's speed= is averaged since the encoder started).</summary>
+        public double RecentSpeed(double outT, double cumulative)
+        {
+            double t = Run.Elapsed.TotalSeconds;
+            lock (_out)
+            {
+                _out.Add((t, outT)); while (_out.Count > 2 && _out[0].t < t - 10) _out.RemoveAt(0);
+                return _out.Count > 1 && t - _out[0].t >= 8 ? (_out[^1].outT - _out[0].outT) / (t - _out[0].t) : cumulative;
+            }
+        }
+        public void Reset() { lock (_out) _out.Clear(); lock (_lags) { _lags.Clear(); _feed.Clear(); } Run.Restart(); LagLines = 0; SlowSince = -1; LastAction = -1e9; }
+        /// <summary>Share of Ball Pit frames the feed had to skip over the last 20 s (the encoder didn't read them in time).</summary>
+        public double SkipRatio(BallPitFeed? f)
+        {
+            if (f == null) return 0; double t = Run.Elapsed.TotalSeconds;
+            lock (_lags)
+            {
+                _feed.Add((t, f.Written, f.Skipped)); while (_feed.Count > 2 && _feed[0].t < t - 20) _feed.RemoveAt(0);
+                if (_feed.Count < 2 || t - _feed[0].t < 15) return 0;
+                long w = _feed[^1].written - _feed[0].written, k = _feed[^1].skipped - _feed[0].skipped;
+                return w + k <= 0 ? 0 : (double)k / (w + k);
+            }
+        }
+        public void OnLag(string input, double lag) { lock (_lags) { if (!_lags.TryGetValue(input, out var l)) _lags[input] = l = new(); l.Add((Run.Elapsed.TotalSeconds, lag)); if (l.Count > 200) l.RemoveAt(0); } }
+        /// <summary>Largest growth of any input's "Resumed reading … lag" over the last 20 s.</summary>
+        public double LagGrowth()
+        {
+            double t = Run.Elapsed.TotalSeconds, g = 0;
+            lock (_lags) foreach (var l in _lags.Values) { var w = l.Where(x => x.t > t - 20).ToList(); if (w.Count > 1) g = Math.Max(g, w[^1].lag - w[0].lag); }
+            return g;
+        }
+    }
+    readonly PaceMonitor _pace = new();
+    public PaceMonitor Pace => _pace;
+    double _pitDegrade = 1; bool _pitHalfRate, _lowestWarned; volatile bool _plannedRestart;
+    public double PitDegrade => _pitDegrade;
+    public int AutoDegrades { get; private set; }
+    /// <summary>Raised with a user-facing warning when the encoder can't keep up (also logged).</summary>
+    public event Action<string>? PerformanceWarning;
+    /// <summary>Speed below 0.97x for 15 s, or the -re inputs' lag growing, after a 25 s warm-up: lower the Ball Pit load.</summary>
+    void PaceCheck(double speed)
+    {
+        if (!PitActive || !_p.BallPit.AutoQuality || _plannedRestart) return;
+        double t = _pace.Run.Elapsed.TotalSeconds; speed = _pace.RecentSpeed(_outTime, speed); if (t < 25 || speed <= 0) return;
+        if (speed < 0.97) { if (_pace.SlowSince < 0) _pace.SlowSince = t; } else _pace.SlowSince = -1;
+        bool slow = _pace.SlowSince >= 0 && t - _pace.SlowSince >= 15, lagging = _pace.LagGrowth() > 5;
+        double skip = _pace.SkipRatio(PitFeed); bool starving = skip > 0.10;   // the stream is real time but the pit stutters
+        if (!(slow || lagging || starving) || t - _pace.LastAction < 20) return;
+        _pace.LastAction = t; _pace.SlowSince = -1; AutoDegrades++;
+        var why = slow ? $"speed {speed:0.00}x" : lagging ? $"inputs falling behind by {_pace.LagGrowth():0} s per 20 s" : $"{skip:P0} of the Ball Pit frames dropped";
+        if (PitFeed is { HalfRate: false } f) { f.HalfRate = _pitHalfRate = true; Warn($"⚠ Encoder can't keep up ({why}) — lowering Ball Pit quality: drawing every 2nd frame."); return; }
+        double floor = 0.5 / Math.Max(0.25, _p.BallPit.RenderScale);
+        if (_pitDegrade > floor * 1.12)   // a step worth an encoder restart (≥ ~10 % smaller)
+        {
+            // size the step from how far behind it is (pixels ∝ scale²), so one restart usually suffices
+            double need = slow ? speed : starving ? 1 - skip : 0.75 * 0.75;
+            double step = Math.Clamp(Math.Sqrt(Math.Max(0.05, need)) * 0.85, 0.5, 0.85);
+            _pitDegrade = Math.Max(floor, _pitDegrade * step);
+            Warn($"⚠ Encoder can't keep up ({why}) — lowering Ball Pit quality: render size {Math.Round(_p.BallPit.RenderScale * _pitDegrade * 100)} % (restarting the encoder).");
+            _plannedRestart = true; try { _enc?.Kill(true); } catch { }
+            return;
+        }
+        if (_lowestWarned) return; _lowestWarned = true;
+        Warn($"⚠ Encoder can't keep up ({why}) even at the lowest Ball Pit quality. Try a lower resolution/fps, a faster encoder preset or the hardware encoder.");
+    }
+    void Warn(string m) { Emit(m); try { PerformanceWarning?.Invoke(m); } catch { } State?.Invoke("Live — " + m.TrimStart('⚠', ' ')); }
+
     bool _capsLogged;
     volatile bool _encProgress; volatile string? _encFatal;
     /// <summary>ffmpeg lines that mean the command line itself is wrong (retrying can't help).</summary>
@@ -486,7 +569,8 @@ public sealed class StreamEngine
         int musicPort = MusicActive ? StreamControl.FreePort() : 0;
         int pitPort = PitActive ? StreamControl.FreePort() : 0;
         int radioPort = RadioActive ? StreamControl.FreePort() : 0;
-        double rs = Math.Clamp(_p.BallPit.RenderScale, 0.25, 1);
+        double rs = Math.Clamp(_p.BallPit.RenderScale * _pitDegrade, 0.25, 1);
+        _pace.Reset();
         int pw = Math.Max(16, (int)(_p.Width * rs) & ~1), ph = Math.Max(16, (int)(_p.Height * rs) & ~1);
         var lo = new CommandBuilder.LiveOptions(ctlPort, musicPort, MicActive ? a.MicDevice : null, TextOverlays,
             MusicMuted ? 0 : a.MusicVolume, MicMuted ? 0 : a.MicVolume, a.MainVolume, _np != null,
@@ -526,6 +610,7 @@ public sealed class StreamEngine
         p.ErrorDataReceived += (_, e) =>
         {
             if (e.Data == null) return;
+            if (ResumedLag.Match(e.Data) is { Success: true } lm) { _pace.OnLag(lm.Groups[1].Value, double.Parse(lm.Groups[2].Value, CultureInfo.InvariantCulture)); if (_pace.LagLines++ % 30 != 0) return; }   // keep the log readable
             Emit(e.Data);
             if (!_encProgress && _encFatal == null && OptionError.IsMatch(e.Data)) _encFatal = e.Data.Trim();
             var m = SlaveFailed.Match(e.Data);
@@ -609,6 +694,7 @@ public sealed class StreamEngine
                 _np?.TrackChanged(TrackKey);
             }
         }
+        PaceCheck(D(kv, "speed"));
         Stats?.Invoke(new StreamStats(D(kv, "fps"), D(kv, "bitrate"), D(kv, "speed"), (long)D(kv, "frame"),
             (long)D(kv, "drop_frames"), (long)D(kv, "dup_frames"), _uptime.Elapsed, _reconnects, idx, count, name, pos));
     }

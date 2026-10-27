@@ -155,6 +155,19 @@ static class BallPitTests
         lo = lo with { BallPitMode = "Source", BallPitW = 1280, BallPitH = 720 };
         a = string.Join(" ", CommandBuilder.EncoderArgs(p, new[] { new CommandBuilder.Destination("x", "rtmp://h/x/k") }, false, lo));
         Check(a.Contains("[0:v]nullsink;[1:v]setpts=PTS-STARTPTS,fps=30,format=yuv420p,setsar=1[v0]") && !a.Contains("scale=1280:720:flags"), "source mode: ball pit replaces the video, playlist keeps the audio");
+        // v2.6.1 pacing: a live Ball Pit sets the pace → no -re on pipe:0, wallclock timestamps, card drawn in C# (no PNG input)
+        var dd = new[] { new CommandBuilder.Destination("x", "rtmp://h/x/k") };
+        var live = CommandBuilder.EncoderArgs(p, dd, false, lo with { Card = true });
+        int ip = live.IndexOf("pipe:0");
+        Check(ip > 0 && !live.Contains("-re"), "pit active: no -re anywhere (live TCP input paces the graph)");
+        Check(!string.Join(" ", live).Contains("np_card.png"), "pit active: no card PNG input (card drawn into the pit frames)");
+        Check(string.Join(" ", live).Contains("-use_wallclock_as_timestamps 1 -f rawvideo"), "pit input uses wall-clock timestamps");
+        var nolive = CommandBuilder.EncoderArgs(p, dd, false, new CommandBuilder.LiveOptions(Card: true));
+        Check(nolive.Contains("-re") && string.Join(" ", nolive).Contains("np_card.png"), "no pit: -re and card PNG input kept");
+        var pa = new Profile { Encoder = "h264_amf", VideoKbps = 6000 };
+        var va = string.Join(" ", CommandBuilder.VideoEncoderArgs(pa));
+        Check(va.Contains("-usage lowlatency") && va.Contains("-quality speed") && va.Contains("-b:v 2500k -maxrate 2500k -bufsize 5000k"), "AMF: low-latency speed preset, capped at 2.5 Mbps");
+        pa.VideoKbps = 2000; Check(string.Join(" ", CommandBuilder.VideoEncoderArgs(pa)).Contains("-b:v 2000k"), "AMF: lower bitrates untouched");
         Console.WriteLine(fails == 0 ? "BALL PIT UNIT TESTS PASSED" : $"{fails} FAILED");
         return fails;
     }

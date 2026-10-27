@@ -22,7 +22,9 @@ public static class CommandBuilder
     {
         var a = new List<string>();
         if ((caps ?? FfmpegCaps.All).InputThreadQueue) a.AddRange(new[] { "-thread_queue_size", "16" });
-        a.AddRange(new[] { "-f", "rawvideo", "-pix_fmt", "bgra", "-video_size", $"{w}x{h}", "-framerate", fps.ToString(Inv),
+        // v2.6.1: wall-clock timestamps. The timeline then follows real time even if the feed skips or stalls (gaps become
+        // repeated frames in the fps filter) instead of shrinking to however many frames arrived.
+        a.AddRange(new[] { "-use_wallclock_as_timestamps", "1", "-f", "rawvideo", "-pix_fmt", "bgra", "-video_size", $"{w}x{h}", "-framerate", fps.ToString(Inv),
             "-i", $"tcp://127.0.0.1:{port}?listen=1&listen_timeout=20000" });
         return a;
     }
@@ -287,16 +289,18 @@ public static class CommandBuilder
         return string.Join(";", f);
     }
 
+    public const int AmfMaxKbps = 2500;
     public static List<string> VideoEncoderArgs(Profile p, FfmpegCaps? caps = null)
     {
         var c = caps ?? FfmpegCaps.All;
-        string v = p.VideoKbps + "k", max = p.VideoKbps + "k", buf = (p.VideoKbps * 2) + "k", g = (p.Fps * Math.Max(1, p.KeyframeSeconds)).ToString();
+        int kb = p.Encoder == "h264_amf" ? Math.Min(p.VideoKbps, AmfMaxKbps) : p.VideoKbps;   // v2.6.1: AMF capped (CBR overshoots otherwise)
+        string v = kb + "k", max = kb + "k", buf = (kb * 2) + "k", g = (p.Fps * Math.Max(1, p.KeyframeSeconds)).ToString();
         var a = p.Encoder switch
         {
             "h264_nvenc" => new List<string> { "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr", "-profile:v", "high" },
             "h264_qsv" => new List<string> { "-c:v", "h264_qsv", "-preset", "veryfast", "-profile:v", "high" },
             "h264_vaapi" => new List<string> { "-c:v", "h264_vaapi", "-rc_mode", "CBR", "-profile:v", "high" },
-            "h264_amf" => new List<string> { "-c:v", "h264_amf", "-usage", "lowlatency", "-quality", "speed", "-rc", "cbr" },
+            "h264_amf" => new List<string> { "-c:v", "h264_amf", "-usage", "lowlatency", "-quality", "speed", "-rc", "cbr", "-bf", "0" },
             _ => new List<string> { "-c:v", "libx264", "-preset", "veryfast", "-sc_threshold", "0" },
         };
         // drop encoder-private options this build doesn't know (they were renamed/removed across AMF/NVENC/QSV versions)
@@ -333,7 +337,11 @@ public static class CommandBuilder
         if (c.InputThreadQueue) a.AddRange(new[] { "-thread_queue_size", "1024" });
         if (c.ReinitFilter) a.AddRange(new[] { "-reinit_filter", "0" });
         a.AddRange(HwInitArgs(p.Encoder));
-        a.AddRange(new[] { "-re", "-f", "mpegts", "-i", "pipe:0" });
+        // v2.6.1: -re (readrate) only when the playlist feed is the clock. With the Ball Pit (a live, wall-clock input) pacing the
+        // graph, a second readrate-paced input fights it: on ffmpeg 8/master the -re inputs (feed + card) fall behind with
+        // ever-growing "Resumed reading … after a lag of N s" and the whole output drops to ~0.5-0.65x real time.
+        bool live = lo is { BallPitPort: > 0 };
+        a.AddRange(live ? new[] { "-f", "mpegts", "-i", "pipe:0" } : new[] { "-re", "-f", "mpegts", "-i", "pipe:0" });
         int next = 1;
         if (hasLogo) { a.Add("-i"); a.Add(p.Overlays.ImagePath); next++; }
         int musicIdx = -1, micIdx = -1;
@@ -342,7 +350,7 @@ public static class CommandBuilder
         int radioIdx = -1;
         if (lo is { RadioPort: > 0 }) { a.AddRange(MusicInputArgs(lo.RadioPort, c)); radioIdx = next++; }   // same raw-PCM TCP input as music
         int cardIdx = -1;
-        if (lo is { Card: true }) { a.AddRange(NowPlayingCard.InputArgs()); cardIdx = next++; }
+        if (lo is { Card: true } && !live) { a.AddRange(NowPlayingCard.InputArgs()); cardIdx = next++; }   // with the Ball Pit, the card is drawn into its frames
         int pitIdx = -1;
         if (lo is { BallPitPort: > 0 }) { a.AddRange(BallPitInputArgs(lo.BallPitPort, lo.BallPitW, lo.BallPitH, p.Fps, c)); pitIdx = next++; }
         a.AddRange(new[] { "-filter_complex", EncoderGraph(p, hasLogo, lo, musicIdx, micIdx, c, cardIdx, pitIdx, radioIdx), "-map", "[vout]", "-map", "[aout]" });

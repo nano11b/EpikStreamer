@@ -11,6 +11,7 @@ var FF = Environment.GetEnvironmentVariable("FFMPEG") ?? "/usr/bin/ffmpeg";
 if (mode == "ballpit") return BallPitTests.Unit();
 if (mode == "radio") return RadioTests.Unit();
 if (mode == "radio-live") return RadioTests.Live(FF, dir, Environment.GetEnvironmentVariable("RADIO_URL") ?? "https://radio.seven-labs.com/public/labsfm/playlist.pls", Environment.GetEnvironmentVariable("OUT") ?? dir);
+if (mode == "pace") return PaceTests.Run(FF, dir, Environment.GetEnvironmentVariable("PITMODE") ?? "Source", Environment.GetEnvironmentVariable("CARD") == "1", double.Parse(Environment.GetEnvironmentVariable("SECS") ?? "90", System.Globalization.CultureInfo.InvariantCulture), Environment.GetEnvironmentVariable("ENCODER") ?? "libx264", Environment.GetEnvironmentVariable("OUT") ?? $"{dir}/pace.mp4");
 if (mode == "radio-encode") return RadioTests.Encode(FF, dir, Environment.GetEnvironmentVariable("OUT") ?? $"{dir}/radio.mp4", Environment.GetEnvironmentVariable("RADIO_URL") ?? "mock",
     double.Parse(Environment.GetEnvironmentVariable("SECS") ?? "15", System.Globalization.CultureInfo.InvariantCulture), Environment.GetEnvironmentVariable("DROP") ?? "",
     double.Parse(Environment.GetEnvironmentVariable("DROP_AT") ?? "8", System.Globalization.CultureInfo.InvariantCulture), double.Parse(Environment.GetEnvironmentVariable("DROP_FOR") ?? "8", System.Globalization.CultureInfo.InvariantCulture));
@@ -476,8 +477,9 @@ else if (mode == "requests")
         Check(!a.Skip && b.Skip, "vote skip passed"); if (b.Skip) eng.Skip();
         Check(eng.Card != null && eng.Card.Renders > 0, $"card rendered {eng.Card?.Renders}x");
     }, "VOTE SKIP");
-    At(16, () => Check(tracks.Count >= 3 && tracks[2].EndsWith("silent_640x480_25.mkv"), "after the skip the playlist continues: " + string.Join(" → ", tracks.Select(Path.GetFileName))), "CHECK");
-    At(17, eng.Stop, "STOP");
+    At(16, () => { for (int w = 0; w < 30 && tracks.Count < 3; w++) Thread.Sleep(100); /* on-air switch lands after the 1 s transition */
+        Check(tracks.Count >= 3 && tracks[2].EndsWith("silent_640x480_25.mkv"), "after the skip the playlist continues: " + string.Join(" → ", tracks.Select(Path.GetFileName))); }, "CHECK");
+    At(20, eng.Stop, "STOP");
 }
 else if (mode == "drop")
 {

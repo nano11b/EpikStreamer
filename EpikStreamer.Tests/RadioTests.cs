@@ -209,7 +209,7 @@ static class RadioTests
         return fails;
     }
 
-    static string Run(string exe, params string[] a)
+    public static string Run(string exe, params string[] a)
     {
         var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true }; foreach (var x in a) psi.ArgumentList.Add(x);
         using var pr = Process.Start(psi)!; var o = pr.StandardOutput.ReadToEndAsync(); var e = pr.StandardError.ReadToEnd(); pr.WaitForExit(); return (o.Result + e).Trim();
