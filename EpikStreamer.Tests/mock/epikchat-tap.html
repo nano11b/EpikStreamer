@@ -1,74 +1,94 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>pending</title>
 <script src="chat-tap.js"></script>
-<style>body{font:14px sans-serif;margin:0} .pane{height:400px;overflow:auto}</style></head>
+<script src="msgpack-mini.js"></script>
+<style>body{font:14px sans-serif;margin:0} .pane{height:400px;overflow:auto} .rail button{display:block}</style></head>
 <body>
-<!-- v2.7 tap mock: "site code" below talks to ws-server.js (inferred socket.io-style protocol — EpikChat's real one is
-     unverified). The UI shows Room B while the command room is Lobby; the "Viewing me" panel is never opened.
-     Timeline (page-driven): conn 1 steps 0-3 (backlog, viewers, live msgs in both rooms, join/leave, server drops socket),
-     reconnect, conn 2 steps 0-1 (history replay + duplicate), UI switches to Lobby, steps 2-3 (msg seen by DOM + tap, join). -->
+<!-- v2.7.1 tap mock. The "site code" below talks to ws-server.js in EpikChat's VERIFIED framing (Engine.IO v4 + socket.io
+     msgpack parser: binary packets, text only for open + ping/pong). The UI shows "Room B" while messages arrive in Lobby,
+     The_Bar_Alc_420 and Music. Rooms are switched through the sidebar rail's buttons (accessible name = room name); the composer
+     records [visible room, text]. Connection 1 uses binaryType "arraybuffer", connection 2 the default "blob".
+     Timeline (page-driven): conn 1 steps 0-3 (server drops the socket after 3), reconnect, conn 2 steps 0-2, then finish. -->
 <header>
   <div role="heading" aria-level="1" id="roomTitle">Room B</div>
   <button aria-label="Account menu" aria-haspopup="menu" data-account-button>MeStreamer</button>
 </header>
-<nav><a href="#" id="navLobby">Lobby</a> <a href="#" id="navB">Room B</a></nav>
+<nav class="rail" aria-label="Rooms" id="rail"></nav>
 <main>
-  <div id="paneWrapA" aria-hidden="true" style="display:none">
-    <div data-chat-message-viewport><div role="log" aria-label="Chat messages" data-virtuoso-scroller="true" class="pane">
-      <div data-viewport-type="element"><div data-testid="virtuoso-item-list" id="list-r1"></div></div></div></div>
-  </div>
-  <div id="paneWrapB" aria-hidden="false">
-    <div data-chat-message-viewport><div role="log" aria-label="Chat messages" data-virtuoso-scroller="true" class="pane">
-      <div data-viewport-type="element"><div data-testid="virtuoso-item-list" id="list-r2"></div></div></div></div>
-  </div>
+  <div data-chat-message-viewport><div role="log" aria-label="Chat messages" data-virtuoso-scroller="true" class="pane">
+    <div data-viewport-type="element"><div data-testid="virtuoso-item-list" id="list"></div></div></div></div>
   <form id="composerForm"><input data-chat-composer-input aria-label="Chat message" type="text" maxlength="250" placeholder="Message"></form>
 </main>
 <script>
 const t0 = Date.now();
 window.__all = []; const rec = (src, m) => window.__all.push({ t: Date.now() - t0, src, m });
 window.__epikTap = m => rec('dom', m); window.__epikTapSink = m => rec('tap', m);
-const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
-const rowHtml = m => `<div data-chat-message-row="${m.id}" id="chat-message-${m.id}" class="row"><button aria-label="Open ${esc(m.user.username)}"><img alt="" src="data:,"></button>
-  <div data-chat-message-layout><div><button>${esc(m.user.username)}</button><span data-chat-sender-tags>${m.isBot ? '<span data-chat-tag="bot">BOT</span>' : ''}</span><time datetime="${m.createdAt}">now</time></div><div>${esc(m.content)}</div></div></div>`;
-let visible = 'r2', idx = 0; const cache = { r1: new Map(), r2: new Map() };
+const MP = window.MsgpackMini;
+const ROOMS = { '591fc3fae3492a17c8efdbcf': 'Lobby' };     // learned like the site: favorites + sidebar ack
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const rowHtml = m => `<div data-chat-message-row="${m._id}" id="chat-message-${m._id}" class="row"><button aria-label="Open ${esc(m.senderName)}"><img alt="" src="data:,"></button>
+  <div data-chat-message-layout><div><button>${esc(m.senderName)}</button><span data-chat-sender-tags>${m.senderType === 'bot' ? '<span data-chat-tag="bot">BOT</span>' : ''}</span><time datetime="${new Date(m.createdAt).toISOString()}">now</time></div><div>${esc(m.content)}</div></div></div>`;
+let visible = 'Room B', idx = 0; const cache = new Map();   // room name → Map(id → msg)
 function render(m) {
-  const rid = m.room.id; if (cache[rid].has(m.id)) return; cache[rid].set(m.id, m);   // keyed like React: re-sent ids don't re-render
-  if (rid !== visible) return;
-  const w = document.createElement('div'); w.setAttribute('data-index', idx++); w.innerHTML = rowHtml(m); document.getElementById('list-' + rid).appendChild(w);
+  if (m.messageType !== 'text') return;
+  const room = ROOMS[m.targetId] || '?'; if (!cache.has(room)) cache.set(room, new Map());
+  const c = cache.get(room); if (c.has(m._id)) return; c.set(m._id, m);   // keyed like React: re-sent ids don't re-render
+  if (room !== visible) return;
+  const w = document.createElement('div'); w.setAttribute('data-index', idx++); w.innerHTML = rowHtml(m); document.getElementById('list').appendChild(w);
 }
-function show(rid) {   // the user opens a room: its pane becomes visible with the cached messages (backlog for the observer)
-  visible = rid; const list = document.getElementById('list-' + rid); list.innerHTML = '';
-  for (const m of cache[rid].values()) { const w = document.createElement('div'); w.setAttribute('data-index', idx++); w.innerHTML = rowHtml(m); list.appendChild(w); }
-  document.getElementById('paneWrapA').style.display = rid === 'r1' ? '' : 'none'; document.getElementById('paneWrapA').setAttribute('aria-hidden', rid === 'r1' ? 'false' : 'true');
-  document.getElementById('paneWrapB').style.display = rid === 'r2' ? '' : 'none'; document.getElementById('paneWrapB').setAttribute('aria-hidden', rid === 'r2' ? 'false' : 'true');
-  document.getElementById('roomTitle').textContent = rid === 'r1' ? 'Lobby' : 'Room B';
+const switches = [];
+function show(room) {   // a room is opened: the pane shows its cached messages (backlog for the observer)
+  visible = room; switches.push(room); const list = document.getElementById('list'); list.innerHTML = '';
+  for (const m of (cache.get(room) || new Map()).values()) { const w = document.createElement('div'); w.setAttribute('data-index', idx++); w.innerHTML = rowHtml(m); list.appendChild(w); }
+  document.getElementById('roomTitle').textContent = room;
 }
-document.getElementById('navLobby').addEventListener('click', e => { e.preventDefault(); show('r1'); });
-document.getElementById('navB').addEventListener('click', e => { e.preventDefault(); show('r2'); });
+function renderRail() {
+  const rail = document.getElementById('rail'); rail.innerHTML = '';
+  for (const name of [...new Set(Object.values(ROOMS))]) {
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', name);
+    b.innerHTML = '<img alt="" src="data:," width="8" height="8"><span class="badge">' + (name.length % 9) + '</span>';
+    b.addEventListener('click', () => setTimeout(() => show(name), 120)); rail.appendChild(b);
+  }
+}
+renderRail();
 const sent = [];
 const input = document.querySelector('[data-chat-composer-input]'); let state = '';
 input.addEventListener('input', e => { state = e.target.value; });
 document.getElementById('composerForm').addEventListener('submit', e => { e.preventDefault(); if (!state) return; sent.push([document.getElementById('roomTitle').textContent, state]); state = ''; input.value = ''; });
 const port = +(/port=(\d+)/.exec(location.hash + location.search) || [0, 0])[1];
-let conns = 0, finished = false;
-function finish() { finished = true; setTimeout(() => { document.title = JSON.stringify({ done: true, conns, all: window.__all, sent, diag: window.__epikTapDiag ? window.__epikTapDiag() : null }); }, window.__holdMs || 2500); }
+let conns = 0, finished = false, pongs = 0;
+window.__mockState = () => ({ visible, switches, sent });
+function finish() { finished = true; setTimeout(() => { document.title = JSON.stringify({ done: true, conns, pongs, all: window.__all, sent, switches, visible, diag: window.__epikTapDiag ? window.__epikTapDiag() : null }); }, window.__holdMs || 2500); }
 function connect() {
-  const c = ++conns; const ws = new WebSocket('ws://127.0.0.1:' + port + '/socket.io/?EIO=4&transport=websocket');
-  let step = 0;
+  const c = ++conns; const ws = new WebSocket('ws://127.0.0.1:' + port + '/chat?EIO=4&transport=websocket');
+  if (c === 1) ws.binaryType = 'arraybuffer';                   // conn 2 keeps the default "blob"
+  let ackId = 0; const acks = new Map();
+  const emit = (ev, arg, cb) => { const p = { type: 2, data: [ev, arg], options: { compress: true }, nsp: '/' }; if (cb) { p.id = ackId++; acks.set(p.id, cb); } ws.send(MP.encode(p)); };
+  let step = 0, poll = null;
   const next = () => { if (ws.readyState !== 1) return;
-    if (c === 2 && step === 2) show('r1');                               // UI switches to the command room before step 2
-    ws.send('42' + JSON.stringify(['step', step++]));
-    if (step <= 3) setTimeout(next, 900); else if (c === 2) setTimeout(finish, 600); };
-  ws.onmessage = e => {
-    const d = String(e.data);
-    if (d[0] === '0') { ws.send('40'); return; }
-    if (d.startsWith('40')) { setTimeout(next, 300); return; }
-    if (!d.startsWith('42')) return;
-    const [ev, p] = JSON.parse(d.slice(2));
-    if (ev === 'room:history') p.messages.forEach(m => render({ ...m, room: p.room }));
-    else if (ev === 'message:new') render(p);
+    emit('step', step++);
+    if (step <= (c === 1 ? 3 : 2)) setTimeout(next, 900); else if (c === 2) setTimeout(finish, 900); };
+  const onPacket = pk => {
+    if (pk.type === 0) {   // connected: load the sidebar, resume, start the viewer poll (as the site does while live)
+      emit('getSidebarData', {}, r => { for (const x of r.rooms) ROOMS[x._id] = x.name; renderRail(); (r.recentMessages || []).forEach(render); });
+      emit('resumeOpenApp', { rooms: [] }, () => { });
+      const vp = () => emit('getBroadcastViewers', { broadcastId: 'meowington-0123456789ab' }, () => { });
+      vp(); poll = setInterval(vp, 1000);
+      setTimeout(next, 400); return;
+    }
+    if (pk.type === 3) { const cb = acks.get(pk.id); acks.delete(pk.id); if (cb) cb(...pk.data); return; }
+    if (pk.type === 2 && pk.data[0] === 'message') render(pk.data[1]);
   };
-  ws.onclose = () => { if (!finished && c < 2) setTimeout(connect, 400); };
+  ws.onmessage = e => {
+    if (typeof e.data === 'string') {
+      if (e.data[0] === '0') { ws.send(MP.encode({ type: 0, nsp: '/', data: { token: 'FAKE-mock-chat-token' } })); return; }
+      if (e.data === '2') { ws.send('3'); pongs++; }
+      return;
+    }
+    if (e.data instanceof ArrayBuffer) onPacket(MP.decode(new Uint8Array(e.data)));
+    else e.data.arrayBuffer().then(b => onPacket(MP.decode(new Uint8Array(b))));
+  };
+  ws.onclose = () => { clearInterval(poll); if (!finished && c < 2) setTimeout(connect, 400); };
 }
 setTimeout(connect, 800);
 </script>

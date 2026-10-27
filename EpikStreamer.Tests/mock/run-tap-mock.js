@@ -7,6 +7,7 @@ const out = process.argv[2] || path.join(os.tmpdir(), 'tap-chrome.json');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapmock-'));
 const here = __dirname, web = path.join(here, '../../EpikStreamer/Web');
 fs.copyFileSync(path.join(here, 'epikchat-tap.html'), path.join(dir, 'epikchat-tap.html'));
+fs.copyFileSync(path.join(here, 'msgpack-mini.js'), path.join(dir, 'msgpack-mini.js'));
 fs.writeFileSync(path.join(dir, 'chat-tap.js'), 'window.__EPIK_TAP_CFG={"restPoll":false,"restPollSeconds":20,"map":{}};\n' + fs.readFileSync(path.join(web, 'chat-tap.js')));
 fs.writeFileSync(path.join(dir, 'chat-observer.js'), 'window.__EPIK_CFG={"debug":true,"selfName":""};\n' + fs.readFileSync(path.join(web, 'chat-observer.js')));
 const kill = [];

@@ -6,11 +6,11 @@ T=${T:-../bin/Debug/net8.0/EpikStreamer.Tests.dll}
 out=$(mktemp -d)
 node run-tap-mock.js "$out/page.json" 2>&1 | grep -v -i experimental || true
 test -s "$out/page.json"
-dotnet "$T" feedreplay "$out/page.json" "$out/feed.json" Lobby
+dotnet "$T" feedreplay "$out/page.json" "$out/feed.json" "*"
 python3 tap-check.py "$out/feed.json"
 python3 - "$out/page.json" <<'PY'
 import sys,json
 d=json.load(open(sys.argv[1]))['diag']; s=json.dumps(d)
-ok = d and d.get('verified') is False and not any(w in s for w in ['alice','carol','!song','backlog'])
-print(('PASS' if ok else 'FAIL')+' page tap diagnostics: event/field names only, flagged unverified'); sys.exit(0 if ok else 1)
+ok = d and d.get('verified') is True and d['sio']['viewersRequest'] == 'getBroadcastViewers' and d['sio']['decodeErrors'] == 0 and not any(w in s for w in ['alice','carol','!song','!help','FAKE-mock'])
+print(('PASS' if ok else 'FAIL')+' page tap diagnostics: event/field names only, verified protocol, viewers request named'); sys.exit(0 if ok else 1)
 PY

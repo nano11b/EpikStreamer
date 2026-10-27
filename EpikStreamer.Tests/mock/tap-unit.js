@@ -60,8 +60,8 @@ t = load(); for (const j of ['', '3', '{bad', '42[bad', '[]', 'null', '42["x"]',
 check(msgs(t).length === 0, 'malformed frames ignored');
 // ---- v2.7.1: EpikChat's verified framing: socket.io-msgpack binary packets ----
 {
-  const { encode } = require('./msgpack-enc');
-  const t = load(); const B = (pkt, form) => new Uint8Array(encode(pkt, form));
+  const { encode } = require('./msgpack-mini');
+  const t = load(); const B = (pkt, form) => encode(pkt, form);
   const LOBBY = '591fc3fae3492a17c8efdbcf', BAR = '5a00000000000000000000b1', MUSIC = '5a00000000000000000000c2';
   const msg = (id, room, name, text, extra = {}) => ({ _id: id, createdAt: new Date(1793100000123), senderId: extra.senderId || 'aaaaaaaaaaaaaaaaaaaaaaaa', senderName: name, senderType: extra.senderType || 'user', isIncognito: false, targetId: room, targetType: 'room', messageType: extra.messageType || 'text', content: text, deleted: false, format: { color: '#fff' }, shareId: null, reactions: {} });
   // round-trip of the decoder incl. all 3 timestamp forms
