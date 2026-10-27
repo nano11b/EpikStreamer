@@ -37,7 +37,7 @@ public partial class MainWindow
         RebuildChatEngines();
         RefreshSchedule(); RefreshHistory();
         _chat.MessageReceived += m => Dispatcher.UIThread.BeginInvoke(() => OnChatMessage(m));
-        _chat.ObserverStatus += t => Dispatcher.UIThread.BeginInvoke(() => { ChatObsStatus.Text = "Chat observer: " + t; Log("💬 chat observer: " + t); });
+        _chat.ObserverStatus += t => Dispatcher.UIThread.BeginInvoke(() => { ChatObsStatus.Text = "Chat observer: " + t; FeedStatusText.Text = _chat.Feed.SourceStatus(DateTime.Now); Log("💬 chat observer: " + t); });
         ApplyChatPanelConfig();
         Init23();
         _schedTimer.Tick += (_, _) => SchedulerTick(); _schedTimer.Start();
@@ -60,7 +60,7 @@ public partial class MainWindow
         var h = _store.Hotkeys; HotkeysCheck.IsChecked = h.Enabled;
         HkStart.Text = h.StartStop; HkNext.Text = h.Next; HkMusic.Text = h.MuteMusic; HkMic.Text = h.MuteMic; HkOverlays.Text = h.ToggleOverlays;
         var c = _store.Chat;
-        CmdEnableCheck.IsChecked = c.CommandsEnabled; CmdOverlayCheck.IsChecked = c.ShowOnStream; ReplyInChatCheck.IsChecked = c.ReplyInChat; AutoGoLiveCheck.IsChecked = c.AutoGoLive;
+        CmdEnableCheck.IsChecked = c.CommandsEnabled; CmdOverlayCheck.IsChecked = c.ShowOnStream; ReplyInChatCheck.IsChecked = c.ReplyInChat; { var fd = c.Feed; CmdRoomBox.Text = fd.CommandRoom; LiveFeedCheck.IsChecked = fd.LiveFeed; ViewersRestCheck.IsChecked = fd.ViewersRestFallback; AllowRoomSwitchCheck.IsChecked = fd.AllowRoomSwitchToReply; ProtocolMapBox.Text = fd.ProtocolMapJson; } AutoGoLiveCheck.IsChecked = c.AutoGoLive;
         CmdOverlaySecs.Text = c.OverlaySeconds.ToString(); CmdCooldown.Text = c.CooldownSeconds.ToString();
         SongTpl.Text = c.SongTemplate; UptimeTpl.Text = c.UptimeTemplate;
         CustomCmds.Text = string.Join(Environment.NewLine, c.Custom.Select(x => (x.Enabled ? "" : "#") + x.Trigger + " = " + x.Response));
@@ -82,7 +82,7 @@ public partial class MainWindow
         var h = _store.Hotkeys; h.Enabled = HotkeysCheck.IsChecked == true;
         h.StartStop = HkStart.Text.Trim(); h.Next = HkNext.Text.Trim(); h.MuteMusic = HkMusic.Text.Trim(); h.MuteMic = HkMic.Text.Trim(); h.ToggleOverlays = HkOverlays.Text.Trim();
         var c = _store.Chat;
-        c.CommandsEnabled = CmdEnableCheck.IsChecked == true; c.ShowOnStream = CmdOverlayCheck.IsChecked == true; c.ReplyInChat = ReplyInChatCheck.IsChecked == true; c.AutoGoLive = AutoGoLiveCheck.IsChecked == true;
+        c.CommandsEnabled = CmdEnableCheck.IsChecked == true; c.ShowOnStream = CmdOverlayCheck.IsChecked == true; c.ReplyInChat = ReplyInChatCheck.IsChecked == true; { var fd = c.Feed; fd.CommandRoom = (CmdRoomBox.Text ?? "").Trim(); fd.LiveFeed = LiveFeedCheck.IsChecked == true; fd.ViewersRestFallback = ViewersRestCheck.IsChecked == true; fd.AllowRoomSwitchToReply = AllowRoomSwitchCheck.IsChecked == true; fd.ProtocolMapJson = (ProtocolMapBox.Text ?? "").Trim(); } c.AutoGoLive = AutoGoLiveCheck.IsChecked == true;
         c.OverlaySeconds = Int(CmdOverlaySecs.Text, 8, 1, 120); c.CooldownSeconds = Int(CmdCooldown.Text, 10, 0, 3600);
         c.SongTemplate = SongTpl.Text; c.UptimeTemplate = UptimeTpl.Text;
         c.Custom = CustomCmds.Text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 1 && l.Contains('='))
@@ -257,6 +257,7 @@ public partial class MainWindow
     async void ChatDiag_Click(object? s, RoutedEventArgs e)
     {
         var d = await _chat.Diagnostics();
+        if (d != null) { var tap = await _chat.TapDiagnostics(); d = "{\"page\":" + d + ",\"tap\":" + (string.IsNullOrWhiteSpace(tap) ? "null" : tap) + ",\"feed\":" + System.Text.Json.JsonSerializer.Serialize(new { status = _chat.Feed.SourceStatus(DateTime.Now), fromTap = _chat.Feed.FromTap, fromDom = _chat.Feed.FromDom, duplicates = _chat.Feed.Duplicates, otherRoom = _chat.Feed.OtherRoom, unmatched = _chat.Feed.Unmatched, reconnects = _chat.Feed.TapReconnects, queuedReplies = _chat.QueuedReplies }) + "}"; }
         if (d == null) { MessageBox.Show(this, "Open the 💬 Chat panel (signed in) first."); return; }
         var dlg = new SaveFileDialog { Filter = "JSON|*.json", FileName = $"epikchat-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.json" };
         if (dlg.ShowDialog(this) != true) return;

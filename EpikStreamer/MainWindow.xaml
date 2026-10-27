@@ -382,10 +382,10 @@
               <TextBlock x:Name="HotkeyStatus" Foreground="{DynamicResource Dim}" TextWrapping="Wrap" Text="Format: Ctrl+Alt+S, Shift+F9, Win+Num5, MediaNext. Blank = none."/>
             </StackPanel>
           </GroupBox>
-          <GroupBox Header="Chat commands (needs the 💬 Chat panel open)">
+          <GroupBox Header="Chat commands (the 💬 Chat panel must be loaded, any EpikChat tab or room can be showing)">
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="130"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
               <WrapPanel Grid.ColumnSpan="2">
                 <CheckBox x:Name="CmdEnableCheck" Content="Respond to !song, !uptime, !help and custom commands"/>
                 <CheckBox x:Name="CmdOverlayCheck" Content="Show responses on stream"/>
@@ -406,6 +406,16 @@
                 <Button Content="Chat diagnostics…" Style="{StaticResource Secondary}" Click="ChatDiag_Click" ToolTip="Save a sanitized snapshot of the chat page structure (no message text or names) for troubleshooting"/>
               </WrapPanel>
               <TextBlock x:Name="ChatObsStatus" Grid.Row="7" Grid.ColumnSpan="2" Foreground="{DynamicResource Dim}" Text="Chat observer: not attached (open the 💬 Chat panel)"/>
+              <TextBlock Grid.Row="8" Text="Command room"/>
+              <WrapPanel Grid.Row="8" Grid.Column="1">
+                <TextBox x:Name="CmdRoomBox" Width="160" ToolTip="Blank = auto (the room shown when you start streaming). * = all rooms you have joined. Or type a room name."/>
+                <CheckBox x:Name="LiveFeedCheck" Content="Live feed (read chat from EpikChat's connection, any tab)" ToolTip="Reads incoming chat and viewer events passively from the page's own connection. It never sends anything. Takes effect when the chat panel reloads. Unverified against the live site, so the DOM observer stays as a fallback."/>
+                <CheckBox x:Name="ViewersRestCheck" Content="Viewer list fallback" ToolTip="If no live viewer events arrive, re-read the list the 'Viewing me' panel uses (at most once every 20 s, read-only)."/>
+                <CheckBox x:Name="AllowRoomSwitchCheck" Content="Allow switching room to reply" ToolTip="Off: replies for another room wait until that room is showing. On: switch to it briefly, reply, then switch back."/>
+              </WrapPanel>
+              <TextBlock Grid.Row="9" Text="Protocol map"/>
+              <TextBox x:Name="ProtocolMapBox" Grid.Row="9" Grid.Column="1" ToolTip="Advanced, usually blank. A JSON object of event-name regex overrides, e.g. {&quot;message&quot;:&quot;^chat:msg$&quot;}. Keys: skip, history, message, viewList, viewJoin, viewLeave, memJoin, memLeave."/>
+              <TextBlock x:Name="FeedStatusText" Grid.Row="10" Grid.ColumnSpan="2" Foreground="{DynamicResource Dim}" Text="Chat: not attached"/>
             </Grid>
           </GroupBox>
           <GroupBox Header="On-stream alerts (viewer count from the 💬 Chat panel)">

@@ -75,7 +75,7 @@ public class ChatPanel : DockPanel
     public async Task<string?> TapDiagnostics()
     {
         if (!IsLoaded2) return null;
-        try { return await EvalJs("window.__epikTapDiag ? JSON.stringify(window.__epikTapDiag()) : 'null'"); } catch { return null; }
+        try { return JsonSerializer.Deserialize<string>(await EvalJs("window.__epikTapDiag ? JSON.stringify(window.__epikTapDiag()) : 'null'")); } catch { return null; }
     }
     Task<string> EvalJs(string js) => _web.CoreWebView2.ExecuteScriptAsync(js);
     string? _tapScriptId;
