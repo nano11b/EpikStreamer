@@ -262,7 +262,7 @@ public partial class MainWindow
     async void ChatDiag_Click(object? s, RoutedEventArgs e)
     {
         var d = await _chat.Diagnostics();
-        if (d != null) { var tap = await _chat.TapDiagnostics(); d = "{\"page\":" + d + ",\"tap\":" + (string.IsNullOrWhiteSpace(tap) ? "null" : tap) + ",\"feed\":" + System.Text.Json.JsonSerializer.Serialize(new { status = _chat.Feed.SourceStatus(DateTime.Now), fromTap = _chat.Feed.FromTap, fromDom = _chat.Feed.FromDom, duplicates = _chat.Feed.Duplicates, otherRoom = _chat.Feed.OtherRoom, unmatched = _chat.Feed.Unmatched, reconnects = _chat.Feed.TapReconnects, queuedReplies = _chat.QueuedReplies, commandRoom = _chat.Feed.TargetRoom, visibleRoom = _chat.Feed.VisibleRoom, rooms = _chat.Feed.RoomDiagnostics() }) + "}"; }
+        if (d != null) { var tap = await _chat.TapDiagnostics(); d = "{\"page\":" + d + ",\"tap\":" + (string.IsNullOrWhiteSpace(tap) ? "null" : tap) + ",\"feed\":" + System.Text.Json.JsonSerializer.Serialize(new { status = _chat.Feed.SourceStatus(DateTime.Now), fromTap = _chat.Feed.FromTap, fromDom = _chat.Feed.FromDom, duplicates = _chat.Feed.Duplicates, otherRoom = _chat.Feed.OtherRoom, unmatched = _chat.Feed.Unmatched, reconnects = _chat.Feed.TapReconnects, queuedReplies = _chat.QueuedReplies, commandRoom = _chat.Feed.TargetRoom, visibleRoom = _chat.Feed.VisibleRoom, rooms = _chat.Feed.RoomDiagnostics() }) + ",\"ballPit\":" + BallPitDiagnostics() + "}"; }
         if (d == null) { MessageBox.Show(this, "Open the 💬 Chat panel (signed in) first."); return; }
         var dlg = new SaveFileDialog { Filter = "JSON|*.json", FileName = $"epikchat-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.json" };
         if (dlg.ShowDialog(this) != true) return;

@@ -27,7 +27,7 @@ static class BallPitTests
         fails = 0;
         var s = new BallPitSettings { Bounciness = 0.8, Friction = 0.8 };
         // drop + rebound height ≈ e² h
-        var sc = new BallPitScene(s, 1); sc.Join("drop", announce: false); var b = sc.Balls[0];
+        var sc = new BallPitScene(s, 1); sc.Join("drop", announce: false); sc.SpawnAllNow(); var b = sc.Balls[0];
         b.Pos = new Vector3(0, 6, 0); b.Vel = Vector3.Zero; float r = b.Radius; double h0 = 6 - r;
         double minY = 99, peak = 0; bool fell = false;
         for (int i = 0; i < 600; i++)
@@ -46,8 +46,9 @@ static class BallPitTests
         Check(Vector3.Dot(ax0, b.AX) < 0.95, "a rolling ball rotates (avatar rolls with it)");
 
         // crowd: 200 balls stay inside, don't sink into each other, energy dissipates
-        var s2 = new BallPitSettings { Bounciness = 0.6 }; var c2 = new BallPitScene(s2, 2);
+        var s2 = new BallPitSettings { Bounciness = 0.6, MaxBalls = 200 }; var c2 = new BallPitScene(s2, 2);
         for (int i = 0; i < 230; i++) c2.Join("u" + i, announce: false);
+        c2.SpawnAllNow();
         Check(c2.Count == 200 && c2.Waiting == 30, $"cap 200 balls, extra people wait ({c2.Count} + {c2.Waiting} waiting)");
         var sw = Stopwatch.StartNew();
         for (int i = 0; i < 600; i++) c2.Step(1 / 30.0);
@@ -72,11 +73,11 @@ static class BallPitTests
 
         // leave → pop + promote waiting
         for (int i = 0; i < 5; i++) c2.Leave("u" + i);
-        c2.Step(0.6);
+        for (int i = 0; i < 90; i++) c2.Step(1 / 30.0);   // 2.8.3: drop-ins are rate limited (4/s)
         Check(c2.Count == 200 && c2.Waiting == 25 && !c2.Has("u0") && c2.Has("u205"), $"leavers pop out and waiting people drop in ({c2.Count} + {c2.Waiting})");
 
         // commands
-        var c3 = new BallPitScene(new BallPitSettings(), 3); c3.Join("amy", announce: false); c3.Join("bob", announce: false);
+        var c3 = new BallPitScene(new BallPitSettings(), 3); c3.Join("amy", announce: false); c3.Join("bob", announce: false); c3.SpawnAllNow();
         for (int i = 0; i < 120; i++) c3.Step(1 / 60.0);
         var amy = c3.Balls.First(x => x.Name == "amy");
         Check(c3.Command("amy", "!bounce", "", false) != null && amy.Vel.Y > 5, "!bounce jumps your own ball");
@@ -181,6 +182,7 @@ static class BallPitTests
         string[] cols = { "#F87171", "#FBBF24", "#34D399", "#60A5FA", "#A78BFA", "#F472B6", "", "" };
         for (int i = 0; i < n; i++)
             sc.Join(i < names.Length ? names[i] : $"{names[i % names.Length]}{i}", i % 3 == 2 ? null : "fake://avatar/" + i, cols[i % cols.Length], announce: false);
+        sc.SpawnAllNow();
         return sc;
     }
 

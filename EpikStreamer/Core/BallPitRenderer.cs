@@ -36,13 +36,19 @@ public static class BallPitTextures
     {
         try
         {
-            using var src = SKBitmap.Decode(data); if (src == null || src.Width < 2 || src.Height < 2) return null;
+            // 2.8.3: decode at (close to) the final size: JPEG/WebP scale while decoding, so a 2000² photo costs like a 250² one
+            using var codec = SKCodec.Create(new SKMemoryStream(data)); if (codec == null) return null;
+            var full = codec.Info; if (full.Width < 2 || full.Height < 2 || (long)full.Width * full.Height > 40_000_000) return null;
+            var sd = codec.GetScaledDimensions(Math.Min(1f, N * 2f / Math.Min(full.Width, full.Height)));
+            using var src = new SKBitmap(new SKImageInfo(sd.Width, sd.Height, SKColorType.Bgra8888, SKAlphaType.Premul));
+            var res = codec.GetPixels(src.Info, src.GetPixels());
+            if (res is not (SKCodecResult.Success or SKCodecResult.IncompleteInput)) return null;
             int s = Math.Min(src.Width, src.Height);
             using var bmp = new SKBitmap(new SKImageInfo(N, N, SKColorType.Bgra8888, SKAlphaType.Unpremul));
             using (var c = new SKCanvas(bmp))
             {
                 c.Clear(SKColors.Gray);
-                using var p = new SKPaint { FilterQuality = SKFilterQuality.High, IsAntialias = true };
+                using var p = new SKPaint { FilterQuality = SKFilterQuality.Medium, IsAntialias = true };
                 c.DrawBitmap(src, new SKRect((src.Width - s) / 2f, (src.Height - s) / 2f, (src.Width + s) / 2f, (src.Height + s) / 2f), new SKRect(0, 0, N, N), p);
             }
             return Pixels(bmp);
@@ -58,10 +64,39 @@ public static class BallPitTextures
     }
 }
 
+/// <summary>2.8.3: a few dedicated shading threads owned by the renderer. The 2.5–2.8.2 renderer used Parallel.For (the shared
+/// thread pool) while holding the scene lock; avatar loads finishing on pool threads blocked on that lock → the pool starved and
+/// one frame took seconds. These threads never run anything else.</summary>
+sealed class BandPool : IDisposable
+{
+    readonly Thread[] _t; readonly SemaphoreSlim[] _go; readonly CountdownEvent _done = new(1); Action<int>? _work; volatile bool _stop;
+    public int Bands => _t.Length + 1;
+    public BandPool(int extra)
+    {
+        _t = new Thread[Math.Max(0, extra)]; _go = new SemaphoreSlim[_t.Length];
+        for (int i = 0; i < _t.Length; i++)
+        {
+            int k = i; _go[k] = new SemaphoreSlim(0);
+            _t[k] = new Thread(() => { while (true) { _go[k].Wait(); if (_stop) return; try { _work!(k + 1); } catch { } finally { _done.Signal(); } } }) { IsBackground = true, Name = "ball pit shade " + (k + 1) };
+            _t[k].Start();
+        }
+    }
+    public void Run(Action<int> work)
+    {
+        _work = work; _done.Reset(_t.Length + 1);
+        for (int i = 0; i < _t.Length; i++) _go[i].Release();
+        try { work(0); } finally { _done.Signal(); }
+        _done.Wait();
+    }
+    public void Dispose() { _stop = true; foreach (var g in _go) g.Release(); }
+}
+
 /// <summary>
 /// CPU (no GPU) perspective renderer: room (floor grid + far walls, cut-away near walls), floor shadows, per-pixel shaded
 /// spheres with the avatar mapped onto them (rotating with the roll), depth sorted, then labels / pops / speech bubbles.
 /// Output: BGRA premultiplied (Skia N32 on Windows and Linux), straight to ffmpeg rawvideo bgra.
+/// <para>2.8.3: the scene is copied into reused arrays under its lock (microseconds) and drawn without it; quality knobs from
+/// <see cref="BallPitScene.Quality"/> (shadows, highlights, avatars, label limit); name labels are pre-rendered once and cached.</para>
 /// </summary>
 public sealed unsafe class BallPitRenderer : IDisposable
 {
@@ -72,13 +107,20 @@ public sealed unsafe class BallPitRenderer : IDisposable
     readonly SKBitmap _bmp; readonly SKCanvas _c;
     SKBitmap? _bgImg; string _bgPath = "";
     public SKBitmap Bitmap => _bmp;
+    readonly BandPool _pool;
     public BallPitRenderer(int w, int h)
     {
         Width = Math.Max(16, w & ~1); Height = Math.Max(16, h & ~1);
         _bmp = new SKBitmap(new SKImageInfo(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul));
         _c = new SKCanvas(_bmp);
+        _pool = new BandPool(Math.Clamp(Environment.ProcessorCount / 2, 1, 6) - 1);
     }
-    public void Dispose() { _c.Dispose(); _bmp.Dispose(); _bgImg?.Dispose(); }
+    public void Dispose()
+    {
+        _pool.Dispose(); _c.Dispose(); _bmp.Dispose(); _bgImg?.Dispose(); _art?.Dispose();
+        foreach (var v in _labels.Values) v.Img.Dispose(); _labels.Clear();
+        _font?.Dispose(); _bold?.Dispose(); _fill.Dispose(); _stroke.Dispose(); _text.Dispose(); _path.Dispose();
+    }
 
     // camera
     Vector3 _cam, _right, _up, _fwd; float _f; float _cx, _cy;
@@ -97,97 +139,132 @@ public sealed unsafe class BallPitRenderer : IDisposable
 
     static SKColor Col(string hex, SKColor fallback) => BallPitScene.ParseColor(hex) is uint c ? new SKColor((byte)(c >> 16), (byte)(c >> 8), (byte)c) : fallback;
 
+    // ---- snapshot (copied under the scene lock; everything below draws from it) ----
+    struct Snap
+    {
+        public Vector3 Pos, AX, AY, AZ; public float Radius, Z; public bool Leaving; public double LeaveAt, JoinedAt;
+        public uint[] Tex; public uint Tint, LabelColor; public string Name; public string? Bubble, PopText; public double BubbleUntil, PopUntil;
+    }
+    Snap[] _snap = new Snap[64]; int _n, _alive;
+    (Vector3 P, uint C, double Until)[] _parts = new (Vector3, uint, double)[64]; int _np;
+    int[] _order = new int[64]; float[] _keys = new float[64];
+    SphereJob[] _jobs = new SphereJob[64]; int _nj;
+    BallPitQuality _q = new(); RaceGame? _race; RadioCardInfo? _radio; int _overflow;
+    /// <summary>Last frame's draw time split (ms) and ball count, for Stats/diagnostics.</summary>
+    public double LastSnapMs { get; private set; }
+
+    void Snapshot(BallPitScene sc)
+    {
+        var bs = sc.Balls;
+        if (_snap.Length < bs.Count) { int n = Math.Max(bs.Count, _snap.Length * 2); _snap = new Snap[n]; _order = new int[n]; _keys = new float[n]; _jobs = new SphereJob[n]; }
+        _q = sc.Quality; _n = 0; _alive = 0;
+        foreach (var b in bs)
+        {
+            ref var s = ref _snap[_n++];
+            s.Pos = b.Pos; s.AX = b.AX; s.AY = b.AY; s.AZ = b.AZ; s.Radius = b.Radius; s.Leaving = b.Leaving; s.LeaveAt = b.LeaveAt; s.JoinedAt = b.JoinedAt;
+            s.Tex = (_q.Avatars ? b.Texture : b.InitialsTex) ?? b.Texture ?? b.InitialsTex ?? (b.InitialsTex = BallPitTextures.Initials(b.Name, b.Tint));
+            s.Tint = b.HasAvatar && _q.Avatars ? b.Tint : 0; s.LabelColor = b.LabelColor; s.Name = b.Name;
+            s.Bubble = b.Bubble; s.BubbleUntil = b.BubbleUntil; s.PopText = b.PopText; s.PopUntil = b.PopUntil;
+            if (!b.Leaving) _alive++;
+        }
+        var ps = sc.Particles; if (_parts.Length < ps.Count) _parts = new (Vector3, uint, double)[Math.Max(ps.Count, _parts.Length * 2)];
+        _np = 0; foreach (var p in ps) _parts[_np++] = (p.P, p.C, p.Until);
+        _race = sc.Race; _radio = sc.RadioCard; _overflow = sc.Waiting;
+    }
+
     /// <summary>Renders the scene's current state (does not step it).</summary>
     public void Render(BallPitScene sc)
     {
-        lock (sc.Sync)
+        BallPitSettings s; double t, shake; float pulse;
+        var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        lock (sc.Sync) { s = sc.Settings; t = sc.Time; shake = Math.Max(0, sc.ShakeUntil - t); pulse = sc.BeatStrength > 0 ? sc.Pulse : 0; Snapshot(sc); }
+        LastSnapMs = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+        Camera(s, t, shake);
+        if (Transparent) _c.Clear(SKColors.Transparent);
+        else
         {
-            var s = sc.Settings; double t = sc.Time;
-            Camera(s, t, Math.Max(0, sc.ShakeUntil - t));
-            if (Transparent) _c.Clear(SKColors.Transparent);
-            else
+            _c.Clear(Col(s.BackgroundColor, new SKColor(15, 23, 42)));
+            if (!string.IsNullOrWhiteSpace(s.BackgroundImage))
             {
-                _c.Clear(Col(s.BackgroundColor, new SKColor(15, 23, 42)));
-                if (!string.IsNullOrWhiteSpace(s.BackgroundImage))
-                {
-                    if (_bgPath != s.BackgroundImage) { _bgImg?.Dispose(); _bgImg = null; _bgPath = s.BackgroundImage; try { if (File.Exists(_bgPath)) _bgImg = SKBitmap.Decode(_bgPath); } catch { } }
-                    if (_bgImg != null) { using var bp = new SKPaint { FilterQuality = SKFilterQuality.Medium }; _c.DrawBitmap(_bgImg, new SKRect(0, 0, Width, Height), bp); }
-                }
-                if (s.ShowRoom) Room(s);
+                if (_bgPath != s.BackgroundImage) { _bgImg?.Dispose(); _bgImg = null; _bgPath = s.BackgroundImage; try { if (File.Exists(_bgPath)) _bgImg = SKBitmap.Decode(_bgPath); } catch { } }
+                if (_bgImg != null) { _fill.FilterQuality = SKFilterQuality.Medium; _c.DrawBitmap(_bgImg, new SKRect(0, 0, Width, Height), _fill); }
             }
-            if (sc.Race != null) RaceTrack(sc.Race);
-            var alive = sc.Balls;
-            Shadows(alive);
-            // depth sort, far → near
-            var order = alive.Select(b => (b, z: View(b.Pos).Z)).Where(x => x.z > 0.3f).OrderByDescending(x => x.z).ToList();
-            _c.Flush();
-            _pulse = sc.BeatStrength > 0 ? sc.Pulse : 0;
-            Spheres(order, t);
-            Particles(sc, t);
-            Overlays(order, s, t);
-            if (s.ShowCount) Hud(sc.Balls.Count(b => !b.Leaving), sc.Waiting);
-            if (sc.RadioCard is { } rc) RadioCard(rc);
+            if (s.ShowRoom) Room(s);
         }
+        if (_race != null) RaceTrack(_race);
+        if (_q.Shadows) Shadows();
+        // depth sort, far → near (reused arrays)
+        int m = 0;
+        for (int i = 0; i < _n; i++) { var z = View(_snap[i].Pos).Z; _snap[i].Z = z; if (z > 0.3f) { _order[m] = i; _keys[m] = -z; m++; } }
+        Array.Sort(_keys, _order, 0, m);
+        _c.Flush();
+        _pulse = pulse;
+        Spheres(m, t);
+        Particles(t);
+        Overlays(m, s, t);
+        if (s.ShowCount) Hud(_alive, _overflow);
+        if (_radio is { } rc) RadioCard(rc);
         // v2.8 Engage cards (poll, leaderboard, race, toasts). Drawn OUTSIDE sc.Sync: the overlay takes the Engage lock, and the
         // Engage engine calls into the scene (StartRace) while holding it — drawing under both locks deadlocked (lock-order inversion).
         sc.Overlay?.Invoke(_c, Width, Height);
         _c.Flush();
     }
 
+    readonly SKPaint _fill = new() { IsAntialias = true, Style = SKPaintStyle.Fill }, _stroke = new() { IsAntialias = true, Style = SKPaintStyle.Stroke }, _text = new() { IsAntialias = true };
+    readonly SKPath _path = new();
+    static readonly float X0 = BallPitScene.RoomX, Z0 = BallPitScene.RoomZ, H0 = BallPitScene.RoomH;
+    static readonly (Vector3 p, Vector3 n, Vector3[] q)[] Walls =
+    {
+        (new(0, 0, -Z0), new(0, 0, 1), new Vector3[] { new(-X0, 0, -Z0), new(X0, 0, -Z0), new(X0, H0, -Z0), new(-X0, H0, -Z0) }),
+        (new(0, 0, Z0), new(0, 0, -1), new Vector3[] { new(X0, 0, Z0), new(-X0, 0, Z0), new(-X0, H0, Z0), new(X0, H0, Z0) }),
+        (new(-X0, 0, 0), new(1, 0, 0), new Vector3[] { new(-X0, 0, Z0), new(-X0, 0, -Z0), new(-X0, H0, -Z0), new(-X0, H0, Z0) }),
+        (new(X0, 0, 0), new(-1, 0, 0), new Vector3[] { new(X0, 0, -Z0), new(X0, 0, Z0), new(X0, H0, Z0), new(X0, H0, -Z0) }),
+    };
+    static readonly Vector3[] FloorQ = { new(-X0, 0, -Z0), new(X0, 0, -Z0), new(X0, 0, Z0), new(-X0, 0, Z0) };
     void Room(BallPitSettings s)
     {
-        float X = BallPitScene.RoomX, Z = BallPitScene.RoomZ, H = BallPitScene.RoomH;
+        float X = X0, Z = Z0;
         var floor = Col(s.FloorColor, new SKColor(30, 41, 59)); var wall = Col(s.WallColor, new SKColor(38, 52, 74));
-        using var fill = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
-        // far walls: inward normal faces the camera
-        (Vector3 p, Vector3 n, Vector3[] q)[] walls =
-        {
-            (new(0, 0, -Z), new(0, 0, 1), new Vector3[] { new(-X, 0, -Z), new(X, 0, -Z), new(X, H, -Z), new(-X, H, -Z) }),
-            (new(0, 0, Z), new(0, 0, -1), new Vector3[] { new(X, 0, Z), new(-X, 0, Z), new(-X, H, Z), new(X, H, Z) }),
-            (new(-X, 0, 0), new(1, 0, 0), new Vector3[] { new(-X, 0, Z), new(-X, 0, -Z), new(-X, H, -Z), new(-X, H, Z) }),
-            (new(X, 0, 0), new(-1, 0, 0), new Vector3[] { new(X, 0, -Z), new(X, 0, Z), new(X, H, Z), new(X, H, -Z) }),
-        };
-        Poly(new Vector3[] { new(-X, 0, -Z), new(X, 0, -Z), new(X, 0, Z), new(-X, 0, Z) }, floor, fill);
-        using var grid = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1, Color = SKColors.White.WithAlpha(22) };
-        for (float x = -X; x <= X + 0.01f; x += 1) Line(new(x, 0, -Z), new(x, 0, Z), grid);
-        for (float z = -Z; z <= Z + 0.01f; z += 1) Line(new(-X, 0, z), new(X, 0, z), grid);
-        foreach (var (p, n, q) in walls)
+        Poly(FloorQ, floor, _fill);
+        _stroke.StrokeWidth = 1; _stroke.Color = SKColors.White.WithAlpha(22);
+        for (float x = -X; x <= X + 0.01f; x += 1) Line(new(x, 0, -Z), new(x, 0, Z), _stroke);
+        for (float z = -Z; z <= Z + 0.01f; z += 1) Line(new(-X, 0, z), new(X, 0, z), _stroke);
+        foreach (var (p, n, q) in Walls)
         {
             if (Vector3.Dot(n, _cam - p) <= 0) continue;   // the camera is outside this wall: cut away (near wall)
             float shade = 0.85f + 0.15f * Math.Abs(n.X);
-            Poly(q, new SKColor((byte)(wall.Red * shade), (byte)(wall.Green * shade), (byte)(wall.Blue * shade)), fill);
-            using var edge = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2, Color = SKColors.White.WithAlpha(40) };
-            Line(q[0], q[1], edge); Line(q[2], q[3], edge); Line(q[0], q[3], edge); Line(q[1], q[2], edge);
+            Poly(q, new SKColor((byte)(wall.Red * shade), (byte)(wall.Green * shade), (byte)(wall.Blue * shade)), _fill);
+            _stroke.StrokeWidth = 2; _stroke.Color = SKColors.White.WithAlpha(40);
+            Line(q[0], q[1], _stroke); Line(q[2], q[3], _stroke); Line(q[0], q[3], _stroke); Line(q[1], q[2], _stroke);
         }
     }
     void Poly(Vector3[] pts, SKColor c, SKPaint p)
     {
-        using var path = new SKPath(); bool first = true;
-        foreach (var v in pts) { if (!Proj(v, out var s)) return; if (first) path.MoveTo(s); else path.LineTo(s); first = false; }
-        path.Close(); p.Color = c; _c.DrawPath(path, p);
+        _path.Reset(); bool first = true;
+        foreach (var v in pts) { if (!Proj(v, out var s)) return; if (first) _path.MoveTo(s); else _path.LineTo(s); first = false; }
+        _path.Close(); p.Color = c; _c.DrawPath(_path, p);
     }
     void Line(Vector3 a, Vector3 b, SKPaint p) { if (Proj(a, out var s1) && Proj(b, out var s2)) _c.DrawLine(s1, s2, p); }
 
-    void Shadows(List<Ball> balls)
+    static readonly float[] Cos14 = Enumerable.Range(0, 14).Select(i => (float)Math.Cos(i * Math.PI * 2 / 14)).ToArray(), Sin14 = Enumerable.Range(0, 14).Select(i => (float)Math.Sin(i * Math.PI * 2 / 14)).ToArray();
+    void Shadows()
     {
-        using var p = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
-        using var path = new SKPath();
-        foreach (var b in balls)
+        for (int bi = 0; bi < _n; bi++)
         {
+            ref var b = ref _snap[bi];
             float r = b.Radius, hgt = Math.Max(0, b.Pos.Y - r);
             float k = Math.Clamp(1 - hgt / 9f, 0.15f, 1), rr = r * (1 + hgt * 0.08f);
             byte a = (byte)(110 * k * (b.Leaving ? 0.4f : 1));
             for (int ring = 0; ring < 2; ring++)
             {
-                path.Reset(); float rad = ring == 0 ? rr * 1.15f : rr * 0.8f; bool ok = true;
+                _path.Reset(); float rad = ring == 0 ? rr * 1.15f : rr * 0.8f; bool ok = true;
                 for (int i = 0; i < 14; i++)
                 {
-                    double ang = i * Math.PI * 2 / 14;
-                    if (!Proj(new Vector3(b.Pos.X + rad * (float)Math.Cos(ang), 0.01f, b.Pos.Z + rad * (float)Math.Sin(ang)), out var sp)) { ok = false; break; }
-                    if (i == 0) path.MoveTo(sp); else path.LineTo(sp);
+                    if (!Proj(new Vector3(b.Pos.X + rad * Cos14[i], 0.01f, b.Pos.Z + rad * Sin14[i]), out var sp)) { ok = false; break; }
+                    if (i == 0) _path.MoveTo(sp); else _path.LineTo(sp);
                 }
                 if (!ok) break;
-                path.Close(); p.Color = new SKColor(0, 0, 0, (byte)(a / 2)); _c.DrawPath(path, p);
+                _path.Close(); _fill.Color = new SKColor(0, 0, 0, (byte)(a / 2)); _c.DrawPath(_path, _fill);
             }
         }
     }
@@ -195,11 +272,13 @@ public sealed unsafe class BallPitRenderer : IDisposable
     struct SphereJob { public float Cx, Cy, Rho, Alpha; public Vector3 A0, A1, A2; public uint[] Tex; public uint Tint; }
     static readonly Vector3 LightW = Vector3.Normalize(new Vector3(-0.45f, 0.85f, 0.4f));
 
-    void Spheres(List<(Ball b, float z)> order, double t)
+    Vector3 Row(Vector3 ax) => new(Vector3.Dot(ax, _right), Vector3.Dot(ax, _up), -Vector3.Dot(ax, _fwd));
+    void Spheres(int m, double t)
     {
-        var jobs = new List<SphereJob>(order.Count);
-        foreach (var (b, z) in order)
+        _nj = 0;
+        for (int oi = 0; oi < m; oi++)
         {
+            ref var b = ref _snap[_order[oi]]; float z = b.Z;
             if (!Proj(b.Pos, out var sp)) continue;
             float scale = 1, alpha = 1;
             if (b.Leaving) { float u = (float)Math.Clamp((t - b.LeaveAt) / 0.45, 0, 1); scale = 1 + 0.35f * u; alpha = 1 - u; }
@@ -207,21 +286,20 @@ public sealed unsafe class BallPitRenderer : IDisposable
             float rho = _f * b.Radius * scale * (1 + 0.08f * _pulse) / z;
             if (rho < 0.8f || sp.X + rho < 0 || sp.X - rho > Width || sp.Y + rho < 0 || sp.Y - rho > Height) continue;
             // view-space normal n=(nx,ny,nz) (nz toward camera) → world: right*nx + up*ny - fwd*nz → object: dot with each axis
-            Vector3 Row(Vector3 ax) => new(Vector3.Dot(ax, _right), Vector3.Dot(ax, _up), -Vector3.Dot(ax, _fwd));
-            jobs.Add(new SphereJob { Cx = sp.X, Cy = sp.Y, Rho = rho, Alpha = alpha, A0 = Row(b.AX), A1 = Row(b.AY), A2 = Row(b.AZ), Tex = b.Texture ?? BallPitTextures.Initials(b.Name), Tint = b.HasAvatar ? b.Tint : 0 });
+            _jobs[_nj++] = new SphereJob { Cx = sp.X, Cy = sp.Y, Rho = rho, Alpha = alpha, A0 = Row(b.AX), A1 = Row(b.AY), A2 = Row(b.AZ), Tex = b.Tex, Tint = b.Tint };
         }
         var lv = new Vector3(Vector3.Dot(LightW, _right), Vector3.Dot(LightW, _up), -Vector3.Dot(LightW, _fwd));
         var hv = Vector3.Normalize(lv + new Vector3(0, 0, 1));
-        var basePtr = (uint*)_bmp.GetPixels(); int W = Width, H = Height;
-        int bands = Math.Clamp(Environment.ProcessorCount, 1, 16), bh = (H + bands - 1) / bands;
-        Parallel.For(0, bands, bi =>
+        var basePtr = (uint*)_bmp.GetPixels(); int W = Width, H = Height, bands = _pool.Bands, bh = (H + bands - 1) / bands, nj = _nj; var jobs = _jobs; bool spec = _q.Specular;
+        if (nj == 0) return;
+        _pool.Run(bi =>
         {
             int y0 = bi * bh, y1 = Math.Min(H, y0 + bh);
-            foreach (var j in jobs) Shade(basePtr, W, y0, y1, j, lv, hv);
+            for (int k = 0; k < nj; k++) Shade(basePtr, W, y0, y1, jobs[k], lv, hv, spec);
         });
     }
 
-    static void Shade(uint* dst, int W, int by0, int by1, in SphereJob j, Vector3 lv, Vector3 hv)
+    static void Shade(uint* dst, int W, int by0, int by1, in SphereJob j, Vector3 lv, Vector3 hv, bool specular)
     {
         int y0 = Math.Max(by0, (int)MathF.Floor(j.Cy - j.Rho - 1)), y1 = Math.Min(by1, (int)MathF.Ceiling(j.Cy + j.Rho + 1));
         int x0 = Math.Max(0, (int)MathF.Floor(j.Cx - j.Rho - 1)), x1 = Math.Min(W, (int)MathF.Ceiling(j.Cx + j.Rho + 1));
@@ -248,7 +326,12 @@ public sealed unsafe class BallPitRenderer : IDisposable
                 float diff = Math.Max(0, lv.X * nx + lv.Y * ny + lv.Z * nz);
                 float sh = 0.32f + 0.78f * diff;
                 float rim = 1 - 0.25f * d2 * d2;
-                float spec = hv.X * nx + hv.Y * ny + hv.Z * nz; spec = spec > 0 ? MathF.Pow(spec, 40) * 0.75f : 0;
+                float spec = 0;
+                if (specular)
+                {
+                    float s1 = hv.X * nx + hv.Y * ny + hv.Z * nz;
+                    if (s1 > 0) { float s2 = s1 * s1, s4 = s2 * s2, s8 = s4 * s4, s32 = s8 * s8; s32 *= s32; spec = s32 * s8 * 0.75f; }   // s^40 without Pow
+                }
                 r = Math.Min(1, r * sh * rim + spec); g = Math.Min(1, g * sh * rim + spec); b = Math.Min(1, b * sh * rim + spec);
                 // premultiplied "over"
                 uint dp = row[x]; float ia = 1 - cov;
@@ -259,39 +342,61 @@ public sealed unsafe class BallPitRenderer : IDisposable
         }
     }
 
-    void Particles(BallPitScene sc, double t)
+    void Particles(double t)
     {
-        using var p = new SKPaint { IsAntialias = true };
-        foreach (var q in sc.Particles)
+        _fill.Color = SKColors.White;
+        for (int i = 0; i < _np; i++)
         {
+            var q = _parts[i];
             if (!Proj(q.P, out var s)) continue; var z = View(q.P).Z;
             float life = (float)Math.Clamp((q.Until - t) / 0.8, 0, 1);
-            p.Color = new SKColor((byte)(q.C >> 16), (byte)(q.C >> 8), (byte)q.C, (byte)(255 * life));
-            _c.DrawCircle(s, Math.Max(1.5f, _f * 0.09f / z), p);
+            _fill.Color = new SKColor((byte)(q.C >> 16), (byte)(q.C >> 8), (byte)q.C, (byte)(255 * life));
+            _c.DrawCircle(s, Math.Max(1.5f, _f * 0.09f / z), _fill);
         }
     }
 
+    // ---- name labels: rendered once per (name, colour, size) and cached (LRU, ≤ 300 images) ----
+    readonly Dictionary<(string, uint, int), (SKImage Img, long Used)> _labels = new(); long _labelTick;
+    public int LabelCacheCount => _labels.Count;
+    SKImage Label(string name, uint color, int size)
+    {
+        var key = (name, color, size);
+        if (_labels.TryGetValue(key, out var e)) { _labels[key] = (e.Img, ++_labelTick); return e.Img; }
+        if (_labels.Count >= 300)
+        {
+            foreach (var k in _labels.OrderBy(x => x.Value.Used).Take(60).Select(x => x.Key).ToList()) { _labels[k].Img.Dispose(); _labels.Remove(k); }
+        }
+        _font ??= new SKFont(SKTypeface.Default, 14);
+        _font.Size = size;
+        var shown = name.Length > 18 ? name[..17] + "…" : name;
+        float w = Measure(_font, shown), hgt = size + 6;
+        int iw = (int)Math.Ceiling(w + 12), ih = (int)Math.Ceiling(hgt);
+        using var surf = SKSurface.Create(new SKImageInfo(Math.Max(1, iw), Math.Max(1, ih), SKColorType.Bgra8888, SKAlphaType.Premul));
+        var c = surf.Canvas; c.Clear(SKColors.Transparent);
+        using var bg = new SKPaint { IsAntialias = true, Color = new SKColor(0, 0, 0, 140) };
+        c.DrawRoundRect(new SKRect(0, 0, iw, ih), hgt / 2, hgt / 2, bg);
+        using var tp = new SKPaint { IsAntialias = true, Color = new SKColor((byte)(color >> 16), (byte)(color >> 8), (byte)color) };
+        c.DrawText(shown, 6, ih - 5 - (hgt - 6 - size * 0.75f) / 2, _font, tp);
+        var img = surf.Snapshot(); _labels[key] = (img, ++_labelTick); return img;
+    }
+
     SKFont? _font, _bold;
-    void Overlays(List<(Ball b, float z)> order, BallPitSettings s, double t)
+    void Overlays(int m, BallPitSettings s, double t)
     {
         _font ??= new SKFont(SKTypeface.Default, 14); _bold ??= new SKFont(SKTypeface.FromFamilyName(null, SKFontStyle.Bold) ?? SKTypeface.Default, 18);
-        using var text = new SKPaint { IsAntialias = true };
-        using var bg = new SKPaint { IsAntialias = true };
-        bool many = order.Count > 120;
-        foreach (var (b, z) in order)   // far → near so close labels win
+        bool labels = s.Labels && _alive <= _q.LabelLimit, many = _alive > 120;
+        for (int oi = 0; oi < m; oi++)   // far → near so close labels win
         {
+            ref var b = ref _snap[_order[oi]];
             if (b.Leaving || !Proj(b.Pos, out var sp)) continue;
-            float rho = _f * b.Radius / z, top = sp.Y - rho;
-            if (s.Labels && rho >= (many ? 11 : 7))
+            float rho = _f * b.Radius / b.Z, top = sp.Y - rho;
+            if (labels && rho >= (many ? 11 : 7))
             {
-                _font.Size = Math.Clamp(rho * 0.55f, 11, 20);
-                var name = b.Name.Length > 18 ? b.Name[..17] + "…" : b.Name;
-                float w = Measure(_font, name), hgt = _font.Size + 6;
-                var rc = new SKRect(sp.X - w / 2 - 6, top - hgt - 4, sp.X + w / 2 + 6, top - 4);
-                bg.Color = new SKColor(0, 0, 0, 140); _c.DrawRoundRect(rc, hgt / 2, hgt / 2, bg);
-                text.Color = new SKColor((byte)(b.LabelColor >> 16), (byte)(b.LabelColor >> 8), (byte)b.LabelColor);
-                _c.DrawText(name, sp.X - w / 2, rc.Bottom - 5 - (hgt - 6 - _font.Size * 0.75f) / 2, _font, text);
-                top = rc.Top;
+                int size = (int)Math.Clamp(MathF.Round(rho * 0.55f / 2) * 2, 12, 20);
+                var img = Label(b.Name, b.LabelColor, size);
+                float x = sp.X - img.Width / 2f, y = top - img.Height - 4;
+                _c.DrawImage(img, x, y);
+                top = y;
             }
             if (b.Bubble != null && t < b.BubbleUntil) Bubble(b.Bubble, sp.X, top - 6, (float)Math.Clamp((b.BubbleUntil - t) / 0.4, 0, 1));
             if (b.PopText != null && t < b.PopUntil)
@@ -300,8 +405,8 @@ public sealed unsafe class BallPitRenderer : IDisposable
                 _bold.Size = Math.Clamp(Height / 26f, 16, 34) * (age < 0.2f ? 0.6f + 2f * age : 1);
                 float w = Measure(_bold, b.PopText);
                 float y = Math.Max(_bold.Size + 4, top - 10 - age * 28);
-                text.Color = new SKColor(0, 0, 0, (byte)(200 * a)); _c.DrawText(b.PopText, sp.X - w / 2 + 2, y + 2, _bold, text);
-                text.Color = new SKColor(253, 224, 71, (byte)(255 * a)); _c.DrawText(b.PopText, sp.X - w / 2, y, _bold, text);
+                _text.Color = new SKColor(0, 0, 0, (byte)(200 * a)); _c.DrawText(b.PopText, sp.X - w / 2 + 2, y + 2, _bold, _text);
+                _text.Color = new SKColor(253, 224, 71, (byte)(255 * a)); _c.DrawText(b.PopText, sp.X - w / 2, y, _bold, _text);
             }
         }
     }
@@ -311,10 +416,10 @@ public sealed unsafe class BallPitRenderer : IDisposable
         float w = Measure(_font, msg), h = _font.Size + 12;
         x = Math.Clamp(x, w / 2 + 10, Width - w / 2 - 10);
         var rc = new SKRect(x - w / 2 - 10, bottom - h - 8, x + w / 2 + 10, bottom - 8);
-        using var p = new SKPaint { IsAntialias = true, Color = new SKColor(255, 255, 255, (byte)(235 * a)) };
-        _c.DrawRoundRect(rc, 10, 10, p);
-        using var tail = new SKPath(); tail.MoveTo(x - 7, rc.Bottom - 1); tail.LineTo(x + 7, rc.Bottom - 1); tail.LineTo(x, bottom); tail.Close(); _c.DrawPath(tail, p);
-        p.Color = new SKColor(17, 24, 39, (byte)(255 * a)); _c.DrawText(msg, rc.Left + 10, rc.Bottom - 6 - (h - 12 - _font.Size * 0.75f) / 2, _font, p);
+        _fill.Color = new SKColor(255, 255, 255, (byte)(235 * a));
+        _c.DrawRoundRect(rc, 10, 10, _fill);
+        _path.Reset(); _path.MoveTo(x - 7, rc.Bottom - 1); _path.LineTo(x + 7, rc.Bottom - 1); _path.LineTo(x, bottom); _path.Close(); _c.DrawPath(_path, _fill);
+        _text.Color = new SKColor(17, 24, 39, (byte)(255 * a)); _c.DrawText(msg, rc.Left + 10, rc.Bottom - 6 - (h - 12 - _font.Size * 0.75f) / 2, _font, _text);
     }
     float _pulse; SKBitmap? _art; string _artKey = "";
     static string Fmt(double s) { var t = TimeSpan.FromSeconds(Math.Max(0, s)); return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss"); }
@@ -396,7 +501,7 @@ public sealed unsafe class BallPitRenderer : IDisposable
     void Hud(int n, int waiting)
     {
         _bold ??= new SKFont(SKTypeface.Default, 18); _bold.Size = Math.Clamp(Height / 34f, 12, 26);
-        var s = $"{n} in the ball pit" + (waiting > 0 ? $" (+{waiting} waiting)" : "");
+        var s = $"{n} in the ball pit" + (waiting > 0 ? $" · +{waiting} more" : "");
         float w = Measure(_bold, s);
         using var p = new SKPaint { IsAntialias = true, Color = new SKColor(0, 0, 0, 130) };
         var rc = new SKRect(Width - w - 34, Height - _bold.Size - 30, Width - 14, Height - 14);

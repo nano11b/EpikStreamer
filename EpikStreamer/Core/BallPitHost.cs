@@ -20,12 +20,12 @@ public sealed class BallPitHost : IDisposable
         Avatars = new AvatarCache(cacheDir) { PageFetch = pageFetch };
         Scene.TextureFor = url => Avatars.Get(url);
         Avatars.Ready += (url, tex) => Scene.AvatarReady(url, tex);
-        Roster.OnJoin = m => { Scene.Join(m.Name, m.Avatar, m.Color, announce: Scene.Settings.JoinEvents); };
+        Roster.OnJoin = m => { Scene.Join(m.Name, m.Avatar, m.Color, announce: Scene.Settings.JoinEvents, viewer: Roster.IsViewer(m.Name)); };
         Roster.OnLeave = n => Scene.Leave(n);
     }
     bool IsMe(string n) => MyName.Length > 0 && string.Equals(n.Trim(), MyName.Trim(), StringComparison.OrdinalIgnoreCase);
 
-    public void Apply(BallPitSettings s) { Scene.Settings = s; Roster.Settings = s; }
+    public void Apply(BallPitSettings s) { s.Migrate(); Scene.Settings = s; Roster.Settings = s; }
     public int People => Scene.Count + Scene.Waiting;
 
     public void OnChat(ChatMessage m)

@@ -66,12 +66,26 @@ public partial class MainWindow
         }
         if (BpTabVisible) BpUpdateStatus();
     }
+    int _bpQuality = 1;
+    /// <summary>2.8.3: Ball Pit numbers for the diagnostics file (counts and timings only; no names).</summary>
+    string BallPitDiagnostics()
+    {
+        if (_pit == null) return "null";
+        var sc = _pit.Scene; var f = _engine?.IsRunning == true ? _engine.PitFeed : null; var c = _pit.Avatars;
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            mode = sc.Settings.Mode, quality = sc.Settings.Quality, maxBalls = sc.Settings.MaxBalls, cap = sc.Cap, spawnPerSecond = sc.Settings.SpawnPerSecond,
+            balls = sc.Count, overflow = sc.Overflow, spawned = sc.Spawned, evicted = sc.Evicted, coalesced = sc.Coalesced, peopleSeen = _pit.Roster.Count,
+            avatars = c == null ? null : new { cached = c.Count, kb = c.Bytes / 1024, maxKb = c.MaxBytes / 1024, loading = c.InFlight, loaded = c.Loaded, failed = c.Failed, evictions = c.Evictions },
+            feed = f == null ? null : new { frameMsAvg = Math.Round(f.FrameMsAvg, 2), frameMsP95 = Math.Round(f.FrameMsP95, 2), frameMsMax = Math.Round(f.FrameMsMax, 2), renderFps = Math.Round(f.RenderFps, 1), level = f.Level, levelName = BallPitQuality.LevelNames[f.Level], levelChanges = f.LevelChanges, renderErrors = f.RenderErrors, written = f.Written, repeats = f.Repeats, skipped = f.Skipped, lagS = Math.Round(f.Lag, 3) },
+        });
+    }
     void BpUpdateStatus()
     {
         if (_pit == null) return;
         var sc = _pit.Scene;
-        var s = $"{sc.Count} in the ball pit" + (sc.Waiting > 0 ? $" (+{sc.Waiting} waiting)" : "") + $" · {_pit.Roster.Count} people seen";
-        if (_engine?.IsRunning == true && _engine.PitFeed is { } f) s += $" · streaming, render {f.RenderFps:0} fps" + (f.Repeats > 0 ? $", {f.Repeats} repeated frames" : "");
+        var s = $"{sc.Count} in the ball pit" + (sc.Waiting > 0 ? $" (+{sc.Waiting} more)" : "") + $" · {_pit.Roster.Count} people seen";
+        if (_engine?.IsRunning == true && _engine.PitFeed is { } f) s += $" · streaming: {f.StatsLine}" + (f.Repeats > 0 ? $", {f.Repeats} repeated frames" : "");
         else if (!_chat.IsLoaded2) s += " · open the 💬 Chat panel to read the member list";
         if (BpStatusExtra.Length > 0) s += " · " + BpStatusExtra;
         BpStatus.Text = s;
@@ -101,7 +115,8 @@ public partial class MainWindow
     void LoadBallPit(Profile p)
     {
         if (_pit == null) return;
-        var b = p.BallPit; var was = _loading; _loading = true;
+        var b = p.BallPit; b.Migrate(); var was = _loading; _loading = true;
+        BpQuality.SelectedIndex = b.Quality switch { "Low" => 0, "High" => 2, _ => 1 }; _bpQuality = BpQuality.SelectedIndex;
         foreach (ComboBoxItem i in BpMode.Items) if ((string)i.Tag == b.Mode) BpMode.SelectedItem = i;
         if (BpMode.SelectedItem == null) BpMode.SelectedIndex = 0;
         BpScale.SelectedIndex = b.RenderScale <= 0.55 ? 2 : b.RenderScale <= 0.8 ? 1 : 0;
@@ -119,8 +134,14 @@ public partial class MainWindow
     {
         var b = p.BallPit;
         b.Mode = (BpMode.SelectedItem as ComboBoxItem)?.Tag as string ?? "Off";
+        b.Quality = BpQuality.SelectedIndex switch { 0 => "Low", 2 => "High", _ => "Medium" };
+        if (BpQuality.SelectedIndex != _bpQuality)   // picking a preset also picks its render size
+        {
+            _bpQuality = BpQuality.SelectedIndex; var was = _loading; _loading = true;
+            var sc = BallPitQuality.Preset(b.Quality).Scale; BpScale.SelectedIndex = sc <= 0.55 ? 2 : sc <= 0.8 ? 1 : 0; _loading = was;
+        }
         b.RenderScale = BpScale.SelectedIndex switch { 2 => 0.5, 1 => 0.75, _ => 1.0 };
-        b.MaxBalls = Int(BpMax.Text, 200, 1, BallPitScene.HardCap);
+        b.MaxBalls = Int(BpMax.Text, BallPitScene.DefaultMax, 1, BallPitScene.HardCap);
         b.BallSize = BpSize.Value; b.Gravity = BpGravity.Value; b.Bounciness = BpBounce.Value; b.Friction = BpFriction.Value;
         b.CameraPitch = BpPitch.Value; b.CameraZoom = BpZoom.Value; b.CameraYaw = BpYaw.Value; b.Orbit = BpOrbit.IsChecked == true;
         b.OrbitSpeed = double.TryParse(BpOrbitSpeed.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var os) ? Math.Clamp(os, -90, 90) : 4;

@@ -562,9 +562,10 @@
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="Mode" Margin="0,0,6,0"/>
               <ComboBox x:Name="BpMode" Width="250" SelectionChanged="BpChanged"><ComboBoxItem Content="Off" Tag="Off"/><ComboBoxItem Content="Source (replaces the video)" Tag="Source"/><ComboBoxItem Content="Overlay (on top of the playlist)" Tag="Overlay"/></ComboBox>
-              <TextBlock Text="Max balls" Margin="12,0,6,0"/><TextBox x:Name="BpMax" Width="50" ToolTip="Up to 300; extra people wait for a free slot"/>
+              <TextBlock Text="Max balls" Margin="12,0,6,0"/><TextBox x:Name="BpMax" Width="50" ToolTip="Default 60, up to 200. Extra people wait (recent chatters first, then viewers) and the pit shows +N more"/>
               <TextBlock Text="Render" Margin="12,0,6,0"/>
               <ComboBox x:Name="BpScale" Width="90" SelectionChanged="BpChanged" ToolTip="Render below the output size and let ffmpeg scale it up (saves CPU)"><ComboBoxItem Content="100%" Tag="1"/><ComboBoxItem Content="75%" Tag="0.75"/><ComboBoxItem Content="50%" Tag="0.5"/></ComboBox>
+              <TextBlock Text="Quality" Margin="12,0,6,0" VerticalAlignment="Center"/><ComboBox x:Name="BpQuality" Width="90" SelectionChanged="BpChanged" ToolTip="Low: no avatars/shadows/labels, 50 %, every 2nd frame drawn. Medium: 75 %. High: 100 %. Quality is also lowered automatically while frames are slow."><ComboBoxItem Content="Low"/><ComboBoxItem Content="Medium"/><ComboBoxItem Content="High"/></ComboBox>
               <Button Content="Save" Click="BpSave_Click" Style="{StaticResource Secondary}"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">

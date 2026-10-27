@@ -409,7 +409,7 @@ public partial class MainWindow : Window
         SReconn.Text = s.Reconnects.ToString();
         SFrames.Text = s.Frames.ToString();
         SItem.Text = $"{s.ItemIndex + 1} / {s.ItemCount}";
-        SItemName.Text = $"{s.ItemName}  @ {TimeSpan.FromSeconds(s.ItemPosition):hh\\:mm\\:ss}";
+        SItemName.Text = $"{s.ItemName}  @ {TimeSpan.FromSeconds(s.ItemPosition):hh\\:mm\\:ss}" + (_engine?.PitActive == true && _engine.PitFeed is { } pf ? "  · " + pf.StatsLine : "");
         if (s.BitrateKbps > 0) { _bitrates.Add(s.BitrateKbps); if (_bitrates.Count > 120) _bitrates.RemoveAt(0); DrawGraph(); }
         UpdateControls();
     }

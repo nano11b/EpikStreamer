@@ -174,6 +174,7 @@ public sealed class StreamEngine
 
     void StartPitFeed(int port, int w, int h, bool transparent)
     {
+        _p.BallPit.Migrate();
         int gen = Interlocked.Increment(ref _pitGen);
         _pitHalfRate |= PitFeed?.HalfRate == true;   // keep a degrade the previous feed chose by itself across encoder restarts
         var feed = new BallPitFeed(BallPit!, w, h, _p.Fps, transparent) { HalfRate = _pitHalfRate }; feed.Log += Emit; PitFeed = feed;
@@ -533,17 +534,8 @@ public sealed class StreamEngine
         _pace.LastAction = t; _pace.SlowSince = -1; AutoDegrades++;
         var why = slow ? $"speed {speed:0.00}x" : lagging ? $"inputs falling behind by {_pace.LagGrowth():0} s per 20 s" : $"{skip:P0} of the Ball Pit frames dropped";
         if (PitFeed is { HalfRate: false } f) { f.HalfRate = _pitHalfRate = true; Warn($"⚠ Encoder can't keep up ({why}) — lowering Ball Pit quality: drawing every 2nd frame."); return; }
-        double floor = 0.5 / Math.Max(0.25, _p.BallPit.RenderScale);
-        if (_pitDegrade > floor * 1.12)   // a step worth an encoder restart (≥ ~10 % smaller)
-        {
-            // size the step from how far behind it is (pixels ∝ scale²), so one restart usually suffices
-            double need = slow ? speed : starving ? 1 - skip : 0.75 * 0.75;
-            double step = Math.Clamp(Math.Sqrt(Math.Max(0.05, need)) * 0.85, 0.5, 0.85);
-            _pitDegrade = Math.Max(floor, _pitDegrade * step);
-            Warn($"⚠ Encoder can't keep up ({why}) — lowering Ball Pit quality: render size {Math.Round(_p.BallPit.RenderScale * _pitDegrade * 100)} % (restarting the encoder).");
-            _plannedRestart = true; try { _enc?.Kill(true); } catch { }
-            return;
-        }
+        // 2.8.3: no more encoder restarts to shrink the render size (a restart IS a stream drop): the feed sheds work instead
+        if (PitFeed is { } pf && pf.RaiseLevel($"encoder can't keep up ({why})")) { Warn($"⚠ Encoder can't keep up ({why}) — lowering Ball Pit quality to level {pf.Level + 1}."); return; }
         if (_lowestWarned) return; _lowestWarned = true;
         Warn($"⚠ Encoder can't keep up ({why}) even at the lowest Ball Pit quality. Try a lower resolution/fps, a faster encoder preset or the hardware encoder.");
     }

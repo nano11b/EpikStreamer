@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.8.3 — 2026-10-27
+### Fixed — a burst of joins in the Ball Pit took the stream down
+- **Root cause (thread dumps during the stall):** the renderer held the scene lock for the whole frame and shaded the balls with `Parallel.For` on the shared .NET thread pool. Every finished avatar download (also on the thread pool) then blocked on that lock to hand its texture over. A burst of ~50 joins started ~50 downloads at once, so ~30 pool threads sat waiting on the lock, and the `Parallel.For` the lock holder was waiting for could not get threads. Frames took seconds, the Ball Pit feed (the only picture input in Ball-Pit-only mode) stopped, ffmpeg produced no output for 13–21 s, and the ingest dropped the stream. The UI thread waited on the same lock, so the app looked frozen too. Two more paths could end the stream: the encoder-side auto-degrade restarted ffmpeg to change the render size, and any render exception silently ended the feed (then the 25 s watchdog killed the encoder).
+- **Rendering no longer holds the lock or uses the thread pool.** The ball state is copied under the lock in microseconds and drawn without it, on the renderer's own shading threads. Avatar hand-over is lock-free and is applied on the next physics step.
+- **The feed can't stall the encoder any more.** A paced writer sends a frame every 1/fps from the newest finished frame, repeating the last one when a render is late. Rendering runs on its own thread. A render exception is logged (throttled), the pit is reset (everyone goes back in the queue) and frames keep flowing. The reason the feed ended is logged.
+- **No encoder restarts for quality.** When the encoder is slow, the Ball Pit lowers its own quality level instead.
+### Added — Ball Pit limits and quality
+- **Cap**: *Max balls* defaults to **60** (was 200), up to 200 (was 300). A profile still on the old default 200 is moved to 60 once; any other value you chose is kept. People over the cap wait in a queue: **recent chatters first, then LIVE viewers, then room members**. The pit shows "N in the ball pit · +M more". A waiting chatter or viewer swaps in for a plain member; members never swap with each other.
+- **Spawn rate limit**: at most 4 new balls per second (burst 2). Leave + rejoin churn is coalesced: a ball that is popping out and comes back is kept, and someone who joins and leaves before their ball appears never spawns. "joined" announcements are skipped during a burst.
+- **Avatars**: at most 3 load/decode at a time, decoded straight to the ball's 64 px texture (JPEG/WebP scale while decoding), kept in an 8 MB LRU, and failed URLs aren't retried for 10 minutes. Balls show initials until their avatar is ready; a frame never waits for one.
+- **Lighter rendering**: uniform-grid collisions, no per-frame allocations (≈ 4 KB/frame, was 40–366 KB), cached name labels (only drawn while ≤ 40 balls on Medium), highlight without `Math.Pow`.
+- **Quality presets** (Ball Pit tab → *Quality*): **Low** (50 % render size, no avatars/shadows/highlights/labels, every 2nd frame drawn), **Medium** (default, 75 %), **High** (100 %). Picking a preset also picks its render size.
+- **Automatic degrade**: if the slowest 10 % of frames take > 80 % of the frame budget for 2 s, the pit goes up one level (1 no shadows/highlights → 2 no labels, fewer particles → 3 every 2nd frame drawn → 4 half the balls). It steps back down after 15 s with plenty of headroom. Each change is logged.
+- **Stats / Log / diagnostics**: pit frame time (avg/p95), ball count, "+N more" and degrade level in the Stats item line and the Ball Pit status; a summary in the log every 5 minutes. *Export diagnostics* has a `ballPit` section (counts and timings only, no names).
+### Numbers (1280×720 @ 30 fps, x264, pit Source + mock radio, 8 cores; 60 s encode, +50 joins at 15 s, 500-member room at 35 s)
+- Before: lag (wall − output) rose from 0.30 s to **+21 s**, 535 frames skipped, "Encoder can't keep up (74 % of the Ball Pit frames dropped)".
+- After: lag 0.03 → 0.04 s (peak +0.04 s), output 1.000 s per wall second, 0 skipped, no encoder restart, pit 3–4 ms avg per frame. Pinned to 2 cores: also flat (peak +0.04 s), p95 ≤ 25 ms.
+### Tests
+- `pitlimits` unit (defaults/migration, cap + priority, rate limit, churn coalescing, degrade levels, avatar LRU, decode concurrency, negative cache, render-exception recovery with frames still flowing, auto degrade and recovery), `pitbench` (renderer/physics table), `pitburst` (the 60 s encode above).
+
 ## 2.8.2 — 2026-10-27
 ### Added — stream with only the Ball Pit and the radio (no video files)
 - **Source selector** at the top of the Source / Playlist tab (Windows and Linux): *Playlist (video files)* or *Ball Pit scene*, with a note saying where the audio comes from (the Radio tab, or silence when the radio is off). It's the same setting as the Ball Pit tab's mode: choosing *Ball Pit scene* sets Mode = Source, choosing *Playlist* turns a Source pit off (an Overlay pit is kept), and changing the Ball Pit tab updates the selector.
