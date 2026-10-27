@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.8.1 — 2026-10-27
+### Fixed — chat commands from background rooms
+- **Commands typed in a joined room that isn't the active tab got no response** (e.g. Lobby active, `!help` in ImpulsiveThots). Root cause: the settings form was filled *before* the 2.7.1 chat-feed migration ran, so a 2.7.0-era blank "Command room" stayed in the box and was saved back on the next settings save (window close, alert test, hotkey apply) with the migration already marked done. Blank meant "auto = the room shown when going live", so messages from every other room were dropped as "other room". Now the migration runs before the form is filled, blank means **all joined rooms**, and settings already saved that way are repaired once (DefaultsVersion 281).
+- **Replies always go to the room the command came from, whichever tab is active and whether or not the chat panel is on screen.** A single serialized reply queue switches to the room through the sidebar, verifies the room is shown, posts through the page's normal composer, confirms the post through our own message coming back on the feed (with that room), then returns to the tab you were on — or keeps the tab you clicked meanwhile. Nothing is ever sent over the socket by the app.
+- Room names are compared with quotes/case/spacing normalized (`Drugs''R''Us` = `Drugs'R'Us` = `Drugs’R’Us`), in the app and in the page's room-switch helper.
+- The same viewer typing the same command in two rooms within 15 s is no longer swallowed as a duplicate (dedupe is per room).
+- Command cooldowns are per room.
+- Unsolicited posts (trivia, races, polls, predictions) go to the stream's room instead of the literal "*" when listening in all rooms.
+### Added
+- Per-room chat diagnostics (Export diagnostics → `feed.rooms`): received, commands seen, delivered, duplicates, drops by reason (incl. command-handler reasons such as cooldown), replies queued / sent / confirmed / failed, last drop reason and last reply result. No message text.
+### Known
+- The tap still doesn't learn `chatCommandsBotId` (`botIds` 0 in diagnostics); bot messages are still flagged by sender type.
+
 ## 2.8.0 — 2026-10-27
 ### Added — Engage: viewer points, rewards, mini-games, polls & predictions
 - **Points** (name configurable, default "Epik Points"; everything per profile on the new **Engage** tab):

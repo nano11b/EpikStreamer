@@ -46,17 +46,23 @@ public sealed class ChatCommands
         .Concat(RadioListed ? new[] { "!np", "!lastsong" } : Array.Empty<string>()).Concat(RadioRequestsListed ? new[] { "!request" } : Array.Empty<string>()).Concat(BallPit != null && BallPitListed ? BallPitScene.CommandNames : Array.Empty<string>()).Concat(_s.Custom.Where(c => c.Enabled).Select(c => c.Trigger.Trim().ToLowerInvariant())).Concat(ExtraTriggers?.Invoke() ?? Array.Empty<string>());
 
     /// <summary>Returns the response for a message or null (not a command, cooldown, duplicate, or our own reply).</summary>
+    /// <summary>2.8.1: why the last <see cref="Handle"/> call returned null (for per-room diagnostics; no message text).</summary>
+    public string LastDrop { get; private set; } = "";
     public string? Handle(ChatMessage m, Context ctx, DateTime now)
     {
-        if (!_s.CommandsEnabled || string.IsNullOrWhiteSpace(m.Text) || m.IsBot) return null;
+        LastDrop = "";
+        string? No(string why) { LastDrop = why; return null; }
+        if (!_s.CommandsEnabled) return No("commands disabled");
+        if (string.IsNullOrWhiteSpace(m.Text)) return No("empty");
+        if (m.IsBot) return No("bot message");
         bool host = m.Self || (_s.MyUsername.Length > 0 && string.Equals(m.User.Trim(), _s.MyUsername.Trim(), StringComparison.OrdinalIgnoreCase));
-        if (BallPit != null && TryBallPit(m, host, now)) return null;   // Ball Pit commands never post a chat reply
-        if (m.Self) return null;
-        if (_s.MyUsername.Length > 0 && string.Equals(m.User.Trim(), _s.MyUsername.Trim(), StringComparison.OrdinalIgnoreCase)) return null;
-        if (m.Id != null) { if (!_seen.Add(m.Id)) return null; _seenQ.Enqueue(m.Id); if (_seenQ.Count > 500) _seen.Remove(_seenQ.Dequeue()); }
+        if (BallPit != null && TryBallPit(m, host, now)) return No("ball pit command (no chat reply)");   // Ball Pit commands never post a chat reply
+        if (m.Self) return No("own message");
+        if (_s.MyUsername.Length > 0 && string.Equals(m.User.Trim(), _s.MyUsername.Trim(), StringComparison.OrdinalIgnoreCase)) return No("own message (username)");
+        if (m.Id != null) { if (!_seen.Add(m.Id)) return No("already handled (same id)"); _seenQ.Enqueue(m.Id); if (_seenQ.Count > 500) _seen.Remove(_seenQ.Dequeue()); }
         var text = m.Text.Trim();
-        if (_ownReplies.Contains(text)) return null;   // never react to our own posted replies
-        if (!text.StartsWith('!')) return null;
+        if (_ownReplies.Contains(text)) return No("our own reply");   // never react to our own posted replies
+        if (!text.StartsWith('!')) return No("not a command");
         var cmd = text.Split(' ', 2)[0].ToLowerInvariant();
         string? tpl = cmd switch
         {
@@ -67,10 +73,12 @@ public sealed class ChatCommands
             "!help" => "Commands: " + string.Join(" ", Triggers.Distinct()),
             _ => _s.Custom.FirstOrDefault(c => c.Enabled && string.Equals(c.Trigger.Trim(), cmd, StringComparison.OrdinalIgnoreCase))?.Response,
         };
-        if (tpl == null) return null;
+        if (tpl == null) return No("unknown command");
         if (cmd == "!np") cmd = "!song";   // shared cooldown
-        if (_last.TryGetValue(cmd, out var t) && (now - t).TotalSeconds < _s.CooldownSeconds) return null;
-        _last[cmd] = now;
+        // 2.8.1: cooldown per room — a !help in Lobby must not silence the same command in another room
+        var ck = ChatFeedRouter.NormRoom(m.Room) + "\n" + cmd;
+        if (_last.TryGetValue(ck, out var t) && (now - t).TotalSeconds < _s.CooldownSeconds) return No("cooldown");
+        _last[ck] = now; if (_last.Count > 2000) _last.Clear();
         var r = Expand(tpl, ctx, m.User);
         _ownReplies.Enqueue(r.Trim()); if (_ownReplies.Count > 20) _ownReplies.Dequeue();
         return r;

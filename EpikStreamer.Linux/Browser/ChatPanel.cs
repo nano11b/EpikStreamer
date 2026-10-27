@@ -24,82 +24,53 @@ public class ChatPanel
 
     // ---- v2.7 chat feed: DOM observer + passive network tap, merged by the router ----
     public Core.ChatFeedRouter Feed { get; } = new(new());
-    readonly Core.ReplyQueue _replies = new();
+    Core.RoomReplyDispatcher? _replyDisp;
+    /// <summary>2.8.1: every reply goes through one serialized dispatcher (switch to the origin room → verify → post → confirm via
+    /// the feed → restore the user's tab), independent of the active tab and of whether this panel is on screen.</summary>
+    Core.RoomReplyDispatcher Replies => _replyDisp ??= new Core.RoomReplyDispatcher(new PageOps(this), Feed) { AllowSwitch = () => Feed.S.AllowRoomSwitchToReply };
+    sealed class PageOps : Core.RoomReplyDispatcher.IPage
+    {
+        readonly ChatPanel _p; public PageOps(ChatPanel p) => _p = p;
+        public bool Ready => _p.IsLoaded2;
+        public string VisibleRoom => _p.Feed.VisibleRoom;
+        public Task<bool> ClickRoom(string room) => _p.Ui(() => _p.ClickRoom(room));
+        public Task<string> SendNow(string text) => _p.Ui(() => _p.SendChatNow(text));
+    }
     System.Threading.Timer? _feedTimer;
     void InitFeed()
     {
         Feed.Message += m => MessageReceived?.Invoke(m);
         Feed.Viewers += (s, n) => ViewersReceived?.Invoke(s, n);
-        _feedTimer = new(_ => { try { Feed.Flush(DateTime.Now); if (_replies.Count > 0 && ++_drainTick % 3 == 0) _ = Dispatch(DrainQueue); } catch { } }, null, 1000, 1000);
+        Replies.Status += s => ObserverStatus?.Invoke(s);
+        _feedTimer = new(_ => { try { Feed.Flush(DateTime.Now); if (Replies.Count > 0) _ = Task.Run(Replies.Pump); } catch { } }, null, 1000, 1000);
     }
     void OnFeedStatus(string t)
     {
         ObserverStatus?.Invoke(t);
-        if (!t.StartsWith("attached to ")) return;
-        var ready = _replies.TakeFor(Feed.VisibleRoom, DateTime.Now);
-        if (ready.Count > 0) _ = Task.Run(async () => { foreach (var x in ready) { var r = await SendChatNow(x); ObserverStatus?.Invoke("queued reply " + r); } });
+        if (t.StartsWith("attached to ") && Replies.Count > 0) _ = Task.Run(Replies.Pump);
     }
-    public int QueuedReplies => _replies.Count;
-    int _drainTick;
-    static Task Dispatch(Func<Task> f) => Avalonia.Application.Current == null ? Task.Run(f) : Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(f);   // no app (selftest) → thread pool
+    public int QueuedReplies => Replies.Count;
+    Task<T> Ui<T>(Func<Task<T>> f) => Avalonia.Application.Current == null || Avalonia.Threading.Dispatcher.UIThread.CheckAccess() ? f() : Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(f);   // no app (selftest) → caller's thread
     /// <summary>Opt-in replies go to the command room (or the room the command came from in all-rooms mode). If that room isn't
     /// the one visible in the panel, the reply is queued until it is — or, with "allow switching room to reply", EpikChat briefly
     /// switches to it (clicks the room in its own room list) and back.</summary>
     /// <summary>Set by the main window: true while the 💬 Chat panel is actually on screen (switching rooms then would be visible).</summary>
     public Func<bool>? OnScreen { get; set; }
-    readonly SemaphoreSlim _switchLock = new(1, 1);
-    bool CanSwitchNow => Feed.S.AllowRoomSwitchToReply && IsLoaded2 && (Feed.S.SwitchWhileVisible || !(OnScreen?.Invoke() ?? false));
+    /// <summary>Kept for callers; 2.8.1 no longer gates room switching on it.</summary>
+    /// <summary>Posts <paramref name="text"/> in <paramref name="room"/> (the room the command came from); "" = the stream's room
+    /// (else the visible one). Completes when delivered (and confirmed on the feed), failed, or expired.</summary>
     public async Task<string> SendChat(string text, string room = "")
     {
-        // all-rooms mode: the reply goes to the room the command came from — never guess the visible room
-        if (room.Length == 0 && Feed.AllRooms) return "skipped: the command's room isn't known";
-        var target = room.Length > 0 ? room : Feed.TargetRoom;
-        if (target == Core.ChatFeedSettings.AllRooms) target = "";
-        await _switchLock.WaitAsync();
-        try
-        {
-            var vis = Feed.VisibleRoom;
-            if (target.Length == 0 || vis.Length == 0 || string.Equals(target.Trim(), vis.Trim(), StringComparison.OrdinalIgnoreCase)) return await SendChatNow(text);
-            if (CanSwitchNow && await SwitchRoom(target))
-            {
-                var r = await SendChatNow(text);
-                await Task.Delay(800); await SwitchRoom(vis);
-                return r + $" (switched to {target} briefly)";
-            }
-            _replies.Enqueue(text, target, DateTime.Now);
-            return $"queued: waiting until {target} is visible" + (Feed.S.AllowRoomSwitchToReply ? " or the chat panel is off screen" : " in the chat panel");
-        }
-        finally { _switchLock.Release(); }
+        if (room == Core.ChatFeedSettings.AllRooms) room = "";
+        if (room.Length == 0) room = Feed.HomeRoom;
+        var t = Replies.Enqueue(text, room);
+        _ = Task.Run(Replies.Pump);
+        return await t;
     }
-    /// <summary>Delivers queued replies by switching rooms once the panel is off screen (called from the 1 s feed timer).</summary>
-    async Task DrainQueue()
+    async Task<bool> ClickRoom(string name)
     {
-        if (_replies.Count == 0 || !CanSwitchNow || !await _switchLock.WaitAsync(0)) return;
-        try
-        {
-            var vis = Feed.VisibleRoom; if (vis.Length == 0) return;
-            foreach (var room in _replies.Rooms())
-            {
-                if (!CanSwitchNow) break;
-                bool here = string.Equals(room.Trim(), vis.Trim(), StringComparison.OrdinalIgnoreCase);
-                if (!here && !await SwitchRoom(room)) continue;
-                foreach (var t in _replies.TakeFor(room, DateTime.Now)) ObserverStatus?.Invoke("queued reply " + await SendChatNow(t) + (here ? "" : $" (switched to {room} briefly)"));
-                if (!here) { await Task.Delay(800); await SwitchRoom(vis); }
-            }
-        }
-        catch { }
-        finally { _switchLock.Release(); }
-    }
-    async Task<bool> SwitchRoom(string name)
-    {
-        try
-        {
-            var r = JsonSerializer.Deserialize<string>(await EvalJs("window.__epikSwitchRoom ? window.__epikSwitchRoom(" + JsonSerializer.Serialize(name) + ") : 'no-helper'"));
-            if (r != "clicked") return false;
-            for (int i = 0; i < 25; i++) { await Task.Delay(200); if (string.Equals(Feed.VisibleRoom.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase)) { await Task.Delay(500); return true; } }
-        }
-        catch { }
-        return false;
+        try { return JsonSerializer.Deserialize<string>(await EvalJs("window.__epikSwitchRoom ? window.__epikSwitchRoom(" + JsonSerializer.Serialize(name) + ") : 'no-helper'")) == "clicked"; }
+        catch { return false; }
     }
     /// <summary>Sanitized tap diagnostics: event names + field names/types only (no text, names, tokens or cookies).</summary>
     public async Task<string?> TapDiagnostics()

@@ -28,7 +28,7 @@ const ROOMS = { '591fc3fae3492a17c8efdbcf': 'Lobby' };     // learned like the s
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const rowHtml = m => `<div data-chat-message-row="${m._id}" id="chat-message-${m._id}" class="row"><button aria-label="Open ${esc(m.senderName)}"><img alt="" src="data:,"></button>
   <div data-chat-message-layout><div><button>${esc(m.senderName)}</button><span data-chat-sender-tags>${m.senderType === 'bot' ? '<span data-chat-tag="bot">BOT</span>' : ''}</span><time datetime="${new Date(m.createdAt).toISOString()}">now</time></div><div>${esc(m.content)}</div></div></div>`;
-let visible = 'Room B', idx = 0; const cache = new Map();   // room name → Map(id → msg)
+let visible = (/visible=([^&]+)/.exec(location.hash) || [0, 'Room B'])[1].replace(/%20/g, ' '), idx = 0; const cache = new Map();   // room name → Map(id → msg)
 function render(m) {
   if (m.messageType !== 'text') return;
   const room = ROOMS[m.targetId] || '?'; if (!cache.has(room)) cache.set(room, new Map());
@@ -45,16 +45,19 @@ function show(room) {   // a room is opened: the pane shows its cached messages 
 function renderRail() {
   const rail = document.getElementById('rail'); rail.innerHTML = '';
   for (const name of [...new Set(Object.values(ROOMS))]) {
-    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', name);
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', name.replace(/''/g, "'"));   // the sidebar shows Drugs'R'Us
     b.innerHTML = '<img alt="" src="data:," width="8" height="8"><span class="badge">' + (name.length % 9) + '</span>';
     b.addEventListener('click', () => setTimeout(() => show(name), 120)); rail.appendChild(b);
   }
 }
-renderRail();
+renderRail(); document.getElementById('roomTitle').textContent = visible;
 const sent = [];
 const input = document.querySelector('[data-chat-composer-input]'); let state = '';
 input.addEventListener('input', e => { state = e.target.value; });
-document.getElementById('composerForm').addEventListener('submit', e => { e.preventDefault(); if (!state) return; sent.push([document.getElementById('roomTitle').textContent, state]); state = ''; input.value = ''; });
+document.getElementById('composerForm').addEventListener('submit', e => { e.preventDefault(); if (!state) return; const room = document.getElementById('roomTitle').textContent; sent.push([room, state]);
+  const rid = Object.keys(ROOMS).find(k => ROOMS[k] === room); if (window.__say && rid) window.__say(rid, state);   // the site posts it; the server echoes message(self)
+  if (window.__onSent) window.__onSent(room, state);
+  state = ''; input.value = ''; });
 const port = +(/port=(\d+)/.exec(location.hash + location.search) || [0, 0])[1];
 let conns = 0, finished = false, pongs = 0;
 window.__mockState = () => ({ visible, switches, sent });
@@ -64,10 +67,11 @@ function connect() {
   if (c === 1) ws.binaryType = 'arraybuffer';                   // conn 2 keeps the default "blob"
   let ackId = 0; const acks = new Map();
   const emit = (ev, arg, cb) => { const p = { type: 2, data: [ev, arg], options: { compress: true }, nsp: '/' }; if (cb) { p.id = ackId++; acks.set(p.id, cb); } ws.send(MP.encode(p)); };
-  let step = 0, poll = null;
+  let step = 0, poll = null; window.__say = (room, text) => { if (ws.readyState === 1) emit('mockSay', { room, text }); };
   const next = () => { if (ws.readyState !== 1) return;
     emit('step', step++);
-    if (step <= (c === 1 ? 3 : 2)) setTimeout(next, 900); else if (c === 2) setTimeout(finish, 900); };
+    const last = window.__scenarioSteps ? window.__scenarioSteps[c - 1] : (c === 1 ? 3 : 2);
+    if (step <= last) setTimeout(next, window.__stepMs || 900); else if (c === 2) setTimeout(finish, 900); };
   const onPacket = pk => {
     if (pk.type === 0) {   // connected: load the sidebar, resume, start the viewer poll (as the site does while live)
       emit('getSidebarData', {}, r => { for (const x of r.rooms) ROOMS[x._id] = x.name; renderRail(); (r.recentMessages || []).forEach(render); });

@@ -241,14 +241,16 @@
   // ⚠ NOT VERIFIED against the live site: any visible link/button/tab/list item (outside the chat log and member lists) whose
   // text is exactly the room name.
   window.__epikSwitchRoom = name => {
-    const want = String(name || '').trim().toLowerCase(); if (!want) return 'no name';
-    if ((st.room || '').trim().toLowerCase() === want) return 'clicked';
+    // 2.8.1: quotes normalized like the C# side (the socket can carry "Drugs''R''Us" where the page shows "Drugs'R'Us" / ’)
+    const norm = s => String(s || '').trim().replace(/[\u2018\u2019\u02BC`]/g, "'").replace(/'{2,}/g, "'").replace(/\s+/g, ' ').toLowerCase();
+    const want = norm(name); if (!want) return 'no name';
+    if (norm(st.room) === want) return 'clicked';
     const log = findLog(); const VIEWERS_ASIDE = 'aside[aria-label="Your live stream viewers" i]';
     const cands = [...document.querySelectorAll('a, button, [role="link"], [role="tab"], [role="treeitem"], [role="option"], [role="menuitem"], [role="listitem"]')]
       .filter(e => shown(e) && !(log && log.contains(e)) && !e.closest(S.members) && !e.closest('[role="dialog"]') && !e.closest(VIEWERS_ASIDE));
-    const lbl = e => ((e.getAttribute('aria-label') || '').trim() || (e.textContent || '').replace(/\s+/g, ' ').trim()).toLowerCase();
+    const lbl = e => norm((e.getAttribute('aria-label') || '').trim() || (e.textContent || ''));
     // v2.7.1 (verified): the sidebar rail's room buttons carry the room name as their accessible name, e.g. "The_Bar_Alc_420"
-    const hit = cands.find(e => (e.getAttribute('aria-label') || '').trim().toLowerCase() === want) || cands.find(e => lbl(e) === want) || cands.find(e => lbl(e).replace(/^#\s*/, '').replace(/\s*\d+$/, '') === want);
+    const hit = cands.find(e => norm(e.getAttribute('aria-label')) === want) || cands.find(e => lbl(e) === want) || cands.find(e => lbl(e).replace(/^#\s*/, '').replace(/\s*\d+$/, '') === want);
     if (!hit) return 'room not found in the room list';
     hit.click(); setTimeout(schedule, 300); return 'clicked';
   };

@@ -53,6 +53,10 @@ public partial class MainWindow
     // ---------- settings <-> UI ----------
     void LoadAppSettings()
     {
+        // 2.8.1 root-cause fix: migrate the chat-feed defaults BEFORE the form is filled. Before, the form showed the pre-migration
+        // blank command room, so the next settings save wrote it back (with the migration marked done) and commands from background
+        // rooms were dropped whenever the active tab was another room.
+        if (_store.Chat.Feed.Migrate()) { Log("💬 chat commands listen in all your joined rooms and reply in the room they came from (2.8.1 settings repair)"); try { _store.Save(); } catch { } }
         _loading = true;
         MinToTrayCheck.IsChecked = _store.MinimizeToTray; CloseToTrayCheck.IsChecked = _store.CloseToTray; NotifyCheck.IsChecked = _store.Notifications;
         StartupCheck.IsChecked = _store.LaunchAtStartup; StartMinCheck.IsChecked = _store.StartMinimized;
@@ -82,7 +86,7 @@ public partial class MainWindow
         var h = _store.Hotkeys; h.Enabled = HotkeysCheck.IsChecked == true;
         h.StartStop = HkStart.Text.Trim(); h.Next = HkNext.Text.Trim(); h.MuteMusic = HkMusic.Text.Trim(); h.MuteMic = HkMic.Text.Trim(); h.ToggleOverlays = HkOverlays.Text.Trim();
         var c = _store.Chat;
-        c.CommandsEnabled = CmdEnableCheck.IsChecked == true; c.ShowOnStream = CmdOverlayCheck.IsChecked == true; c.ReplyInChat = ReplyInChatCheck.IsChecked == true; { var fd = c.Feed; fd.CommandRoom = (CmdRoomBox.Text ?? "").Trim(); fd.LiveFeed = LiveFeedCheck.IsChecked == true; fd.ViewersRestFallback = ViewersRestCheck.IsChecked == true; fd.AllowRoomSwitchToReply = AllowRoomSwitchCheck.IsChecked == true; fd.ProtocolMapJson = (ProtocolMapBox.Text ?? "").Trim(); } c.AutoGoLive = AutoGoLiveCheck.IsChecked == true;
+        c.CommandsEnabled = CmdEnableCheck.IsChecked == true; c.ShowOnStream = CmdOverlayCheck.IsChecked == true; c.ReplyInChat = ReplyInChatCheck.IsChecked == true; { var fd = c.Feed; fd.CommandRoom = string.IsNullOrWhiteSpace(CmdRoomBox.Text) ? ChatFeedSettings.AllRooms : CmdRoomBox.Text.Trim(); fd.LiveFeed = LiveFeedCheck.IsChecked == true; fd.ViewersRestFallback = ViewersRestCheck.IsChecked == true; fd.AllowRoomSwitchToReply = AllowRoomSwitchCheck.IsChecked == true; fd.ProtocolMapJson = (ProtocolMapBox.Text ?? "").Trim(); } c.AutoGoLive = AutoGoLiveCheck.IsChecked == true;
         c.OverlaySeconds = Int(CmdOverlaySecs.Text, 8, 1, 120); c.CooldownSeconds = Int(CmdCooldown.Text, 10, 0, 3600);
         c.SongTemplate = SongTpl.Text; c.UptimeTemplate = UptimeTpl.Text;
         c.Custom = CustomCmds.Text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 1 && l.Contains('='))
@@ -246,7 +250,7 @@ public partial class MainWindow
         var ctx = new ChatCommands.Context { Song = System.IO.Path.GetFileNameWithoutExtension(_lastStats?.ItemName ?? ""), Uptime = live ? _lastStats?.Uptime ?? TimeSpan.Zero : TimeSpan.Zero, Viewers = _lastViewers, Music = _engine?.CurrentMusic ?? "" };
         RadioContext(ctx);
         var resp = HandleChatCommand(m, ctx);
-        if (resp == null) return;
+        if (resp == null) { if (m.Text.TrimStart().StartsWith('!') && _commands.LastDrop.Length > 0) _chat.Feed.NoteDrop(m.Room, "command: " + _commands.LastDrop); return; }
         Log($"💬 {m.User}: {m.Text} → {resp}");
         bool shown = false;
         if (c.ShowOnStream && live) { _engine!.ShowChatResponse(resp, c.OverlaySeconds); shown = true; }
@@ -258,7 +262,7 @@ public partial class MainWindow
     async void ChatDiag_Click(object? s, RoutedEventArgs e)
     {
         var d = await _chat.Diagnostics();
-        if (d != null) { var tap = await _chat.TapDiagnostics(); d = "{\"page\":" + d + ",\"tap\":" + (string.IsNullOrWhiteSpace(tap) ? "null" : tap) + ",\"feed\":" + System.Text.Json.JsonSerializer.Serialize(new { status = _chat.Feed.SourceStatus(DateTime.Now), fromTap = _chat.Feed.FromTap, fromDom = _chat.Feed.FromDom, duplicates = _chat.Feed.Duplicates, otherRoom = _chat.Feed.OtherRoom, unmatched = _chat.Feed.Unmatched, reconnects = _chat.Feed.TapReconnects, queuedReplies = _chat.QueuedReplies }) + "}"; }
+        if (d != null) { var tap = await _chat.TapDiagnostics(); d = "{\"page\":" + d + ",\"tap\":" + (string.IsNullOrWhiteSpace(tap) ? "null" : tap) + ",\"feed\":" + System.Text.Json.JsonSerializer.Serialize(new { status = _chat.Feed.SourceStatus(DateTime.Now), fromTap = _chat.Feed.FromTap, fromDom = _chat.Feed.FromDom, duplicates = _chat.Feed.Duplicates, otherRoom = _chat.Feed.OtherRoom, unmatched = _chat.Feed.Unmatched, reconnects = _chat.Feed.TapReconnects, queuedReplies = _chat.QueuedReplies, commandRoom = _chat.Feed.TargetRoom, visibleRoom = _chat.Feed.VisibleRoom, rooms = _chat.Feed.RoomDiagnostics() }) + "}"; }
         if (d == null) { MessageBox.Show(this, "Open the 💬 Chat panel (signed in) first."); return; }
         var dlg = new SaveFileDialog { Filter = "JSON|*.json", FileName = $"epikchat-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.json" };
         if (dlg.ShowDialog(this) != true) return;

@@ -30,6 +30,7 @@ static class SelfTest
                 "--selftest-golive" => await GoLive(args[1]),
                 "--selftest-members" => await Members(args[1], args[2]),
                 "--selftest-tap" => await Tap(args[1], args[2]),
+                "--selftest-rooms" => await Rooms(args[1], args[2]),
                 "--selftest-engage" => await Engage(args[1], args[2]),
                 "--selftest-secret" => Secret_(),
                 _ => Usage(),
@@ -174,6 +175,53 @@ static class SelfTest
             P($"  tap selftest: page {t.Length} chars, C# received {received.Count} messages, {viewers.Count} viewer snapshots, {replies.Count} replies → {outFile}");
             await chat.SetActive(false);
             return t.StartsWith("{") ? 0 : 1;
+        }
+        finally { try { srv.Kill(true); } catch { } }
+    }
+
+    /// <summary>v2.8.1 the reported bug, end to end through the real ChatPanel/WebKitGTK host: Lobby is the ACTIVE tab and the
+    /// panel stays ON SCREEN; settings are a 2.7.0-era blank command room saved after the 2.7.1 migration. !help arrives from the
+    /// background rooms ImpulsiveThots and "Drugs''R''Us" (sidebar shows Drugs'R'Us); each reply must be posted in its origin room
+    /// via the composer, confirmed by the site's message(self) echo, and the active tab restored (or the tab the user clicked
+    /// mid-reply kept).</summary>
+    static async Task<int> Rooms(string mockDir, string outFile)
+    {
+        var srv = new System.Diagnostics.Process { StartInfo = new("node", $"\"{Path.Combine(mockDir, "ws-server.js")}\" 0 120 rooms") { RedirectStandardOutput = true, UseShellExecute = false } };
+        srv.Start();
+        try
+        {
+            var line = await srv.StandardOutput.ReadLineAsync() ?? ""; var port = Regex.Match(line, @"PORT (\d+)").Groups[1].Value;
+            var html = File.ReadAllText(Path.Combine(mockDir, "epikchat-tap.html")).Replace("<script src=\"chat-observer.js\"></script>", "").Replace("<script src=\"chat-tap.js\"></script>", "")
+                .Replace("<script src=\"msgpack-mini.js\"></script>", "<script>" + File.ReadAllText(Path.Combine(mockDir, "msgpack-mini.js")) + "</script>")
+                .Replace("const t0 = Date.now();", "const t0 = Date.now(); window.__holdMs = 9000; window.__stepMs = 2500; window.__scenarioSteps = [5, 4];"
+                    + " window.__onSent = (room, text) => { if (text.includes('(zoe)')) setTimeout(() => show('Music'), 30); };");   // the user clicks Music right after zoe's reply is posted
+            var f = Tmp("rooms.html", html);
+            var chat = new ChatPanel { ChatUrl = "file://" + f + "#port=" + port + "&visible=Lobby", DebugMessages = true, SelfName = "", ReplyMinIntervalSeconds = 1 };
+            var fs = JsonSerializer.Deserialize<ChatFeedSettings>("{\"CommandRoom\":\"\",\"DefaultsVersion\":271,\"AllowRoomSwitchToReply\":true,\"ViewersRestFallback\":false}")!;   // the reporter's saved settings
+            chat.Feed.S = fs;
+            chat.OnScreen = () => true;   // the panel is visible the whole time (2.8.0 queued every background reply here)
+            var replies = new Dictionary<string, string>(); var received = new List<object>(); var statuses = new List<string>();
+            chat.MessageReceived += m =>
+            {
+                lock (received) received.Add(new { user = m.User, text = m.Text, id = m.Id, room = m.Room, self = m.Self });
+                if (m.Text == "!help" && !m.IsBot && !m.Self)
+                    _ = Task.Run(async () => { var r = await chat.SendChat($"Commands: !song !uptime ({m.User})", m.Room); lock (replies) replies[m.User + "@" + m.Room] = r; P($"  reply to {m.User} in {m.Room}: {r}"); });
+            };
+            chat.ObserverStatus += s => { lock (statuses) statuses.Add(s); P("  status: " + s); };
+            await chat.SetActive(true);
+            var b = await Client();
+            string title = "";
+            for (int i = 0; i < 110 && !title.Contains("\\\"done\\\""); i++) { await Task.Delay(500); title = await b.EvalAsync("chat", "document.title"); }
+            for (int i = 0; i < 40 && chat.QueuedReplies > 0; i++) await Task.Delay(500);
+            await Task.Delay(1500);
+            var state = JsonSerializer.Deserialize<string>(await b.EvalAsync("chat", "JSON.stringify(window.__mockState())")) ?? "{}";
+            object snap; lock (received) lock (replies) lock (statuses)
+                snap = new { page = JsonDocument.Parse(state).RootElement, received = received.ToList(), replies = new Dictionary<string, string>(replies), statuses = statuses.ToList(), queued = chat.QueuedReplies,
+                    commandRoom = chat.Feed.TargetRoom, rooms = chat.Feed.RoomDiagnostics(), otherRoom = chat.Feed.OtherRoom };
+            File.WriteAllText(outFile, JsonSerializer.Serialize(snap));
+            P($"  rooms selftest: {replies.Count} replies → {outFile}");
+            await chat.SetActive(false);
+            return title.Contains("done") ? 0 : 1;
         }
         finally { try { srv.Kill(true); } catch { } }
     }

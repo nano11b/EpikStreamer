@@ -42,7 +42,7 @@ public partial class MainWindow
         PointsLedger ledger;
         try { ledger = new PointsLedger(Path.Combine(dir, "points.json")); }
         catch (Exception ex) { Log("⚠ Could not load the points ledger: " + ex.Message); ledger = new PointsLedger(); }
-        _engage = new EngageEngine(_cur.Engage, ledger) { Host = new EngageHostImpl(this), DefaultRoom = () => _chat.Feed.TargetRoom };
+        _engage = new EngageEngine(_cur.Engage, ledger) { Host = new EngageHostImpl(this), DefaultRoom = () => _chat.Feed.HomeRoom };
         _engage.Log += t => UI(() => Log("🎮 " + t));
         _engage.Changed += () => _engageDirtyUi = true;
         _commands.ExtraTriggers = () => _engage?.Triggers() ?? Array.Empty<string>();
@@ -192,9 +192,9 @@ public partial class MainWindow
         var gm = new StackPanel { Margin = new Thickness(10) };
         gm.Children.Add(Note("!gamble <amount|all|50%>, !slots <amount>, !duel @user <amount> → !accept, trivia (answer in chat), !heist <amount> (odds grow with crew), Ball Pit race: !bet <racer> <amount> while betting is open. Per-user cooldown and a global rate limit apply; you (the host) and the excluded list never play or earn."));
         gm.Children.Add(PropEditor(s.Games));
-        gm.Children.Add(Row(Btn("Start trivia now", () => Deliver(_engage!.StartTrivia(_chat.Feed.TargetRoom, DateTime.Now))),
+        gm.Children.Add(Row(Btn("Start trivia now", () => Deliver(_engage!.StartTrivia(_chat.Feed.HomeRoom, DateTime.Now))),
             Btn("Reload trivia pack", () => _engage!.ReloadTrivia()),
-            Btn("Start Ball Pit race", () => Deliver(_engage!.StartRace(_chat.Feed.TargetRoom, DateTime.Now)))));
+            Btn("Start Ball Pit race", () => Deliver(_engage!.StartRace(_chat.Feed.HomeRoom, DateTime.Now)))));
         var packs = new TextBox { Width = 520, Text = string.Join("; ", s.Games.TriviaPacks) };
         packs.TextChanged += (_, _) => { s.Games.TriviaPacks = (packs.Text ?? "").Split(';').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(); _engage?.ReloadTrivia(); Persist(); };
         gm.Children.Add(Row(new TextBlock { Text = "Trivia packs (JSON files, ; separated)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) }, packs,
@@ -215,7 +215,7 @@ public partial class MainWindow
         {
             var opts = (_pollOpts.Text ?? "").Split('|').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
             if (string.IsNullOrWhiteSpace(_pollQ.Text) || opts.Count < 2) { _pollStatus.Text = "Enter a question and at least 2 options (a | b)."; return; }
-            Deliver(_engage!.StartPoll(_pollQ.Text!.Trim(), opts, int.TryParse(_pollSecs.Text, out var sec) ? sec : s.Polls.DefaultSeconds, _chat.Feed.TargetRoom, DateTime.Now));
+            Deliver(_engage!.StartPoll(_pollQ.Text!.Trim(), opts, int.TryParse(_pollSecs.Text, out var sec) ? sec : s.Polls.DefaultSeconds, _chat.Feed.HomeRoom, DateTime.Now));
         }), Btn("End poll now", () => Deliver(_engage!.EndPoll(DateTime.Now)))));
         pl.Children.Add(H("Prediction"));
         pl.Children.Add(Row(Box(_predQ, 260, "question"), Box(_predOpts, 260, "outcomes separated by |")));
@@ -223,7 +223,7 @@ public partial class MainWindow
         {
             var opts = (_predOpts.Text ?? "").Split('|').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
             if (string.IsNullOrWhiteSpace(_predQ.Text) || opts.Count < 2) { _pollStatus.Text = "Enter a question and at least 2 outcomes."; return; }
-            Deliver(_engage!.OpenPrediction(_predQ.Text!.Trim(), opts, _chat.Feed.TargetRoom, DateTime.Now));
+            Deliver(_engage!.OpenPrediction(_predQ.Text!.Trim(), opts, _chat.Feed.HomeRoom, DateTime.Now));
         }), Btn("Lock", () => Deliver(_engage!.LockPrediction())), Box(_predWinner, 40, "winning outcome #"),
             Btn("Resolve", () => { if (int.TryParse(_predWinner.Text, out var wn)) Deliver(_engage!.ResolvePrediction(wn, DateTime.Now)); }),
             Btn("Cancel (refund)", () => Deliver(_engage!.CancelPrediction()))));

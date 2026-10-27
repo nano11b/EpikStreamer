@@ -408,7 +408,7 @@
               <TextBlock x:Name="ChatObsStatus" Grid.Row="7" Grid.ColumnSpan="2" Foreground="{DynamicResource Dim}" Text="Chat observer: not attached (open the 💬 Chat panel)"/>
               <TextBlock Grid.Row="8" Text="Command room"/>
               <WrapPanel Grid.Row="8" Grid.Column="1">
-                <TextBox x:Name="CmdRoomBox" Width="160" ToolTip="Blank = auto (the room shown when you start streaming). * = all rooms you have joined. Or type a room name."/>
+                <TextBox x:Name="CmdRoomBox" Width="160" ToolTip="* (or blank) = every room you have joined, whichever tab is active. Or type one room name to only answer there."/>
                 <CheckBox x:Name="LiveFeedCheck" Content="Live feed (read chat from EpikChat's connection, any tab)" ToolTip="Reads incoming chat and viewer events passively from the page's own connection. It never sends anything. Takes effect when the chat panel reloads. Unverified against the live site, so the DOM observer stays as a fallback."/>
                 <CheckBox x:Name="ViewersRestCheck" Content="Viewer list fallback" ToolTip="If no live viewer events arrive, re-read the list the 'Viewing me' panel uses (at most once every 20 s, read-only)."/>
                 <CheckBox x:Name="AllowRoomSwitchCheck" Content="Switch room to reply (only while the chat panel is off screen)" ToolTip="On (default): a reply for another room switches EpikChat to it via the sidebar, types it, then switches back — only while the 💬 Chat panel is not on screen; otherwise it waits. Off: replies wait until that room is showing."/>

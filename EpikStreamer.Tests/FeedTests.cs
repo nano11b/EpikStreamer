@@ -7,14 +7,14 @@ static class FeedTests
     public static int Run()
     {
         var t0 = new DateTime(2026, 10, 27, 12, 0, 0);
-        var s = new ChatFeedSettings { CommandRoom = "" };   // 2.7.0 "auto" mode (2.7.1 default is all rooms)
+        var s = new ChatFeedSettings { CommandRoom = "Lobby" };   // one named command room (2.8.1: blank = all rooms, no more "auto")
         var r = new ChatFeedRouter(s); var got = new List<ChatMessage>(); r.Message += got.Add;
         var views = new List<string>(); r.Viewers += (src, n) => views.Add(src + ":" + string.Join(",", n));
         ChatMessage M(string id, string user, string text, string room = "") => new(user, text, id, false, false, room, "");
 
         // Sam streams in Lobby, then looks at Room B
         r.SetVisibleRoom("Lobby"); r.MarkStreamStart(); r.SetVisibleRoom("Room B");
-        Check(r.TargetRoom == "Lobby", "auto command room = room shown when going live");
+        Check(r.TargetRoom == "Lobby" && r.HomeRoom == "Lobby", "named command room");
         // tap message for Lobby with id only: unknown → pending; DOM (Room B) never shows it → mapping learned later
         r.FromTapMessage(M("a1", "alice", "!song"), "r-lobby", t0);
         Check(got.Count == 0, "tap message from an unknown room id waits (pending)");
@@ -83,6 +83,7 @@ static class FeedTests
         var q = new ReplyQueue(); q.Enqueue("Now playing: X", "Lobby", t0); q.Enqueue("Live for 1h", "Room B", t0);
         Check(q.TakeFor("Room C", t0).Count == 0 && q.TakeFor("lobby", t0.AddSeconds(5)).SequenceEqual(new[] { "Now playing: X" }) && q.Count == 1, "reply queued until its room is visible");
         Check(q.TakeFor("Room B", t0.AddMinutes(6)).Count == 0 && q.Count == 0, "queued replies expire after 5 min");
+        fails += RoomsTests.Run();
         Console.WriteLine(fails == 0 ? "FEED UNIT PASSED" : $"{fails} FAILED");
         return fails;
     }

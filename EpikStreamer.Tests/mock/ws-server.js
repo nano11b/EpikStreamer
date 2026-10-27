@@ -6,8 +6,9 @@
 // {status:"success", viewers, broadcastId:"meowington-<12hex>", revision, viewerIds}. All tokens/keys here are FAKE.
 // The page drives the timeline with an EVENT "step" (no id) so it works under any timer speed. Prints "PORT n".
 const http = require('http'), crypto = require('crypto'), { encode, decode } = require('./msgpack-mini');
-let conn = 0;
+let conn = 0, said = 0;
 const LOBBY = '591fc3fae3492a17c8efdbcf', BAR = '5b10000000000000000000b1', MUSIC = '5b10000000000000000000c2', ROOMB = '5b10000000000000000000d3';
+const IMP = '5b10000000000000000000e4', DRUGS = '5b10000000000000000000f5';
 const SELF = '6a0000000000000000000001', BOT = '6a00000000000000000000b0';
 const oid = n => (0x67200000000000000000000n + BigInt(n)).toString(16).padStart(24, '0');
 const uid = s => crypto.createHash('md5').update(s).digest('hex').slice(0, 24);
@@ -19,9 +20,21 @@ const VIEWERS = { 1: [['bob', 'carol'], ['bob', 'carol', 'zed'], ['carol', 'zed'
 const ev = (e, p) => ({ type: 2, nsp: '/', data: [e, p] });
 const accepted = () => ev('connectionAccepted', { serverVersion: '3.14.0', userData: { displayName: 'MeStreamer', username: 'meowington', userId: SELF, picture: 'https://cdn.example.invalid/me.png',
   favorites: [{ type: 'room', roomId: LOBBY, name: 'Lobby', unread: 0 }], chatCommandsBotId: BOT, mutedBotIds: [] } });
-const sidebar = c => ({ rooms: [{ _id: BAR, name: 'The_Bar_Alc_420', type: 'room', memberCount: 41 }, { _id: MUSIC, name: 'Music', type: 'room', memberCount: 9 }, { _id: ROOMB, name: 'Room B', type: 'room', memberCount: 3 }],
+const sidebar = c => ({ rooms: [{ _id: BAR, name: 'The_Bar_Alc_420', type: 'room', memberCount: 41 }, { _id: MUSIC, name: 'Music', type: 'room', memberCount: 9 }, { _id: ROOMB, name: 'Room B', type: 'room', memberCount: 3 },
+    ...(ROOMS_SC ? [{ _id: IMP, name: 'ImpulsiveThots', type: 'room', memberCount: 12 }, { _id: DRUGS, name: "Drugs''R''Us", type: 'room', memberCount: 7 }] : [])],
   recentMessages: c === 1 ? [msg(1, BAR, 'old1', '!help'), msg(2, LOBBY, 'old2', '!song')] : [msg(1, BAR, 'old1', '!help'), msg(2, LOBBY, 'old2', '!song'), msg(10, BAR, 'alice', '!help')] });
-const ENGAGE = process.argv[4] === 'engage';
+const ENGAGE = process.argv[4] === 'engage', ROOMS_SC = process.argv[4] === 'rooms';
+// v2.8.1 rooms scenario (the reported bug): Lobby is the active tab; nano11b types !help in the background room ImpulsiveThots
+// (and in Lobby within the dedupe window), zoe in the apostrophe room "Drugs''R''Us" (the user clicks Music while that reply is
+// being typed), yuki in ImpulsiveThots after the reconnect while the user is on Music.
+function roomsSteps(c, n) {
+  if (c === 1) return ({
+    0: [ev('message', msg(40, IMP, 'nano11b', '!help')), ev('message', msg(41, LOBBY, 'nano11b', '!help'))],
+    1: [ev('message', msg(42, DRUGS, 'zoe', '!help'))],
+    2: ['PING'], 3: [], 4: [], 5: ['CLOSE'],
+  })[n] || [];
+  return ({ 0: [], 1: [], 2: [ev('message', msg(43, IMP, 'yuki', '!help'))], 3: ['PING'], 4: [] })[n] || [];
+}
 // v2.8 Engage scenario: commands from several rooms (replies must land in the room each came from), a host poll with votes
 // from other rooms (incl. a bare number and a changed vote), host !addpoints, a points check, a game and !top after the reconnect.
 function engageSteps(c, n) {
@@ -45,6 +58,7 @@ function engageSteps(c, n) {
 }
 function steps(c, n) {
   if (ENGAGE) return engageSteps(c, n);
+  if (ROOMS_SC) return roomsSteps(c, n);
   if (c === 1) return ({
     0: [ev('message', msg(10, BAR, 'alice', '!help')),                                         // not the visible room
         ev('message', msg(11, LOBBY, 'MeStreamer', '!song', { senderId: SELF })),               // self
@@ -92,6 +106,7 @@ srv.on('upgrade', (req, sock) => {
         const set = VIEWERS[c][Math.min(viewerPoll, VIEWERS[c].length - 1)]; viewerPoll++;
         bin({ type: 3, nsp: '/', id: pk.id, data: [{ status: 'success', viewers: set.map(viewer), broadcastId: 'meowington-0123456789ab', revision: 100 * c + viewerPoll, viewerIds: set.map(uid) }] });
       }
+      else if (name === 'mockSay' && arg && arg.room) bin(ev('message', msg(900 + (++said), arg.room, 'MeStreamer', String(arg.text || ''), { senderId: SELF })));   // the site echoes our own post (message(self), targetId = the room)
       else if (name === 'step') for (const out of steps(c, +arg)) {
         if (out === 'CLOSE') { setTimeout(() => sock.end(Buffer.from([0x88, 0])), 50); break; }
         if (out === 'PING') { text('2'); continue; }

@@ -28,8 +28,8 @@ if host:
     helps = [s for s in sent if s[1].startswith('Commands:')]
     check(sorted(helps) == sorted([['The_Bar_Alc_420', 'Commands: !song !uptime (alice)'], ['Room B', 'Commands: !song !uptime (erin)'], ['The_Bar_Alc_420', 'Commands: !song !uptime (frank)']]),
           f'!help answered once per command, each in its source room: {helps}')
-    check(X['replies'].get('alice', '').startswith('queued'), f"reply while the panel is on screen is queued, not switched: {X['replies'].get('alice')!r}")
-    check('switched' in X['replies'].get('frank', '') and X['replies'].get('erin', '').startswith('sent'), f"panel off screen: reply switched rooms ({X['replies'].get('frank')!r}); visible room sent directly")
+    check('switched' in X['replies'].get('alice', '') and X['replies'].get('alice', '').startswith('sent'), f"2.8.1: reply while the panel is on screen still goes to its room right away: {X['replies'].get('alice')!r}")
+    check('switched' in X['replies'].get('frank', '') and X['replies'].get('erin', '').startswith('sent') and 'switched' not in X['replies'].get('erin', ''), f"background room reply switched rooms ({X['replies'].get('frank')!r}); visible room sent directly")
     check(P.get('visible') == 'Room B' and X['queued'] == 0, f"switched back to the user's room afterwards, queue empty (switches {P.get('switches')})")
     check(not any(s[1].startswith('Commands:') and ('MeStreamer' in s[1] or 'EpikBot' in s[1]) for s in sent), 'no reply to own or bot messages')
     td = X.get('tapDiag'); td = json.loads(td) if isinstance(td, str) else td
