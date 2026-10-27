@@ -81,7 +81,7 @@ public static class CommandBuilder
         if (radioIdx >= 0)
         {
             var rn = p.Radio.Normalize && c.HasFilter("loudnorm") ? "loudnorm=I=-20:TP=-2:LRA=11,aresample=48000," : "";
-            f.Add($"[{radioIdx}:a]aformat=sample_fmts=fltp:channel_layouts=stereo,{rn}volume@radio={V(lo?.RadioVolume ?? p.Radio.Volume)}[ara]");
+            f.Add($"[{radioIdx}:a]aresample=48000:async=1000,aformat=sample_fmts=fltp:channel_layouts=stereo,{rn}volume@radio={V(lo?.RadioVolume ?? p.Radio.Volume)}[ara]");
             if (bg == null) bg = "[ara]";
             else { f.Add($"{bg}[ara]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[abg]"); bg = "[abg]"; }
         }

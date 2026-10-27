@@ -140,7 +140,7 @@ static class RadioTests
             var g = a[a.IndexOf("-filter_complex") + 1]; int ri = a.IndexOf("tcp://127.0.0.1:7777?listen=1&listen_timeout=20000");
             Check(ri > 0 && a[ri - 1] == "-i" && a[ri - 6] == "s16le", "radio input = raw PCM TCP listen");
             Check(caps.InputThreadQueue == (a[ri - 9] == "-thread_queue_size"), $"radio -thread_queue_size only when the build accepts it ({caps.InputThreadQueue})");
-            Check(g.Contains("[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume@radio=0.4[ara]") && g.Contains("[ara][asc]sidechaincompress@duck") && g.Contains("[aout]"), "radio branch: volume@radio + ducking");
+            Check(g.Contains("[1:a]aresample=48000:async=1000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume@radio=0.4[ara]") && g.Contains("[ara][asc]sidechaincompress@duck") && g.Contains("[aout]"), "radio branch: volume@radio + ducking");
             p.Audio.MusicEnabled = true; p.Radio.Normalize = true;
             var lo2 = lo with { MusicPort = 6666 };
             var g2 = CommandBuilder.EncoderGraph(p, false, lo2, 1, -1, caps, -1, -1, 2);
