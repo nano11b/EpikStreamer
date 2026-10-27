@@ -260,6 +260,8 @@ public sealed class BallPitScene
     public float Pulse { get; private set; }
     public int Beats { get; private set; }
     public RadioCardInfo? RadioCard { get; set; }
+    /// <summary>v2.8: extra on-stream cards drawn on top of each frame (Engage overlay). Called by the renderer with Sync held.</summary>
+    public Action<SkiaSharp.SKCanvas, int, int>? Overlay { get; set; }
     float _fast, _slow, _beatPending; double _lastBeat = -10;
     /// <summary>Feed the radio's loudness (one RMS value per ~20 ms chunk, 0..1). Cheap; called from the radio feed thread.</summary>
     public void AudioLevel(float rms)
@@ -285,6 +287,7 @@ public sealed class BallPitScene
             int n = Math.Max(1, (int)Math.Ceiling(dt * 120)); float h = (float)(dt / n);
             for (int i = 0; i < n; i++) SubStep(h);
             Time += dt;
+            if (Race != null) PlaceRacers(dt);
             Balls.RemoveAll(b => b.Leaving && Time - b.LeaveAt > 0.45);
             Particles.RemoveAll(p => p.Until < Time);
             for (int i = 0; i < Particles.Count; i++) { var p = Particles[i]; p.V.Y -= (float)(Settings.Gravity * 0.6 * dt); p.P += p.V * (float)dt; Particles[i] = p; }
@@ -294,6 +297,37 @@ public sealed class BallPitScene
         }
     }
     int _orthoCount;
+
+    // ---- v2.8 Ball Pit race: racers roll along lanes from the left wall to the finish line (positions from the planned race) ----
+    public RaceGame? Race { get; set; }
+    public Func<DateTime> RaceClock { get; set; } = () => DateTime.UtcNow;
+    public const float RaceStartX = -RoomX + 0.9f, RaceFinishX = RoomX - 1.3f;
+    public static float LaneZ(int lane, int lanes) => lanes <= 1 ? 0 : -RoomZ + 0.9f + lane * (2 * RoomZ - 1.8f) / (lanes - 1);
+    /// <summary>Called with Sync held, after physics: racers are placed on their lane, rolling; everyone else just gets nudged by them.</summary>
+    void PlaceRacers(double dt)
+    {
+        var race = Race!; var t = race.Elapsed(RaceClock());
+        for (int i = 0; i < race.Racers.Count; i++)
+        {
+            var b = Find(race.Racers[i]); if (b == null) continue;
+            var p = (float)race.Progress(i, t);
+            var x = RaceStartX + p * (RaceFinishX - RaceStartX);
+            var dx = x - b.Pos.X;
+            var target = new Vector3(x, b.Radius, LaneZ(i, race.Racers.Count));
+            b.Pos = Vector3.Lerp(b.Pos, target, Math.Clamp((float)dt * 12f, 0.15f, 1f)); b.Vel = Vector3.Zero; b.OnFloor = true;
+            if (Math.Abs(dx) > 1e-4f) Rotate(b, -Vector3.UnitZ, dx / Math.Max(0.1f, b.Radius));
+        }
+    }
+    /// <summary>Puts the racers in the pit (they join if needed) and lines them up.</summary>
+    public void StartRace(RaceGame? race)
+    {
+        lock (Sync)
+        {
+            Race = race; if (race == null) return;
+            foreach (var n in race.Racers) if (Find(n) == null) { _waiting.RemoveAll(w => Key(w.Name) == Key(n)); Spawn(n, null, null, false); }
+            for (int i = 0; i < race.Racers.Count; i++) if (Find(race.Racers[i]) is { } b) { b.Pos = new Vector3(RaceStartX, b.Radius + 2, LaneZ(i, race.Racers.Count)); b.PopText = $"#{i + 1}"; b.PopUntil = Time + 3; }
+        }
+    }
     static void Orthonormalize(Ball b)
     {
         b.AX = Vector3.Normalize(b.AX); b.AY = Vector3.Normalize(b.AY - Vector3.Dot(b.AY, b.AX) * b.AX); b.AZ = Vector3.Cross(b.AX, b.AY);

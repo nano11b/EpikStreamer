@@ -115,6 +115,7 @@ public sealed unsafe class BallPitRenderer : IDisposable
                 }
                 if (s.ShowRoom) Room(s);
             }
+            if (sc.Race != null) RaceTrack(sc.Race);
             var alive = sc.Balls;
             Shadows(alive);
             // depth sort, far → near
@@ -126,6 +127,7 @@ public sealed unsafe class BallPitRenderer : IDisposable
             Overlays(order, s, t);
             if (s.ShowCount) Hud(sc.Balls.Count(b => !b.Leaving), sc.Waiting);
             if (sc.RadioCard is { } rc) RadioCard(rc);
+            sc.Overlay?.Invoke(_c, Width, Height);   // v2.8 Engage cards (poll, leaderboard, race, toasts)
             _c.Flush();
         }
     }
@@ -364,6 +366,29 @@ public sealed unsafe class BallPitRenderer : IDisposable
             by -= H * 0.06f;
         }
         if (r.Next.Length > 0) { p.Color = new SKColor(148, 163, 184); _c.DrawText(Fit(_font, "Up next: " + r.Next, tw), tx, by - (r.Duration > 0 ? 2 : 0), _font, p); }
+    }
+
+    /// <summary>v2.8 race lanes + chequered finish line on the floor.</summary>
+    void RaceTrack(RaceGame race)
+    {
+        int n = race.Racers.Count; float y = 0.01f;
+        using var p = new SKPaint { IsAntialias = true, StrokeWidth = 2, Style = SKPaintStyle.Stroke, Color = new SKColor(255, 255, 255, 70) };
+        float half = n <= 1 ? BallPitScene.RoomZ : (2 * BallPitScene.RoomZ - 1.8f) / (n - 1) / 2;
+        for (int i = 0; i <= n; i++)
+        {
+            float z = i < n ? BallPitScene.LaneZ(i, n) - half : BallPitScene.LaneZ(n - 1, n) + half;
+            if (Proj(new Vector3(BallPitScene.RaceStartX, y, z), out var a) && Proj(new Vector3(BallPitScene.RaceFinishX, y, z), out var b)) _c.DrawLine(a, b, p);
+        }
+        p.Style = SKPaintStyle.Fill;
+        float z0 = BallPitScene.LaneZ(0, n) - half, z1 = BallPitScene.LaneZ(n - 1, n) + half; int cells = 16; float fx = BallPitScene.RaceFinishX + BallPitScene.RoomX * 0.0f;
+        for (int r = 0; r < 2; r++)
+            for (int k = 0; k < cells; k++)
+            {
+                float za = z0 + (z1 - z0) * k / cells, zb = z0 + (z1 - z0) * (k + 1) / cells, xa = fx + r * 0.35f, xb = xa + 0.35f;
+                if (!Proj(new Vector3(xa, y, za), out var q0) || !Proj(new Vector3(xb, y, za), out var q1) || !Proj(new Vector3(xb, y, zb), out var q2) || !Proj(new Vector3(xa, y, zb), out var q3)) continue;
+                p.Color = (k + r) % 2 == 0 ? new SKColor(255, 255, 255, 220) : new SKColor(10, 10, 10, 220);
+                using var path = new SKPath(); path.MoveTo(q0); path.LineTo(q1); path.LineTo(q2); path.LineTo(q3); path.Close(); _c.DrawPath(path, p);
+            }
     }
 
     void Hud(int n, int waiting)

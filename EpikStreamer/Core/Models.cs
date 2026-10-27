@@ -95,6 +95,7 @@ public class Profile
     public NowPlayingSettings NowPlaying { get; set; } = new();   // v2.3
     public BallPitSettings BallPit { get; set; } = new();         // v2.5
     public RadioSettings Radio { get; set; } = new();             // v2.6
+    public EngageSettings Engage { get; set; } = new();           // v2.8
 
     public Profile Clone(string newName)
     {
