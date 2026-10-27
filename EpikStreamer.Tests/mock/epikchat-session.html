@@ -2,7 +2,7 @@
 <!-- v2.4.1 mock: EpikChat chat page top nav as in Sam's screenshot (logo, compass/explore, green camera "Go live", gift, avatar).
      The RTMP ingest is REFUSED until a live session was created through camera → "What do you want to stream?" → RTMP encoder →
      Continue → "Choose your audience" → "Create live stream" → "Connect your encoder". The encoder dialog then waits for the ingest
-     and (ASSUMPTION, unverified on the real site) offers a final "Go live" button once the encoder is connected.
+     and (ASSUMPTION, unverified on the real site) has a final "Done" button (VERIFIED in v2.7.1; no other confirm step).
      Query options: ?live=1 (already live), ?samekey=1 (session key = the saved FAKE key), ?noaria=1 (camera button has no
      aria-label/title, found by its video svg), ?plain=1 (no aria-label and no icon class, found by its green color).
      Exposes window.__mockIngest(key) = what the RTMP server would answer. FAKE keys only. -->
@@ -29,10 +29,8 @@ const later = f => setTimeout(f, 150 + Math.random() * 250);
 window.__creates = 0; window.__golive = 0; window.__session = null; window.__live = false; window.__ingest = []; window.__finalClicks = 0;
 function renderNav(){
   const slot = document.getElementById('glslot'); slot.innerHTML = '';
-  if (window.__live) {   // live: the camera button turns into an active state and an "End stream" button appears
-    const e = document.createElement('button'); e.type = 'button'; e.textContent = 'End stream'; e.addEventListener('click', () => { window.__live = false; window.__session = null; renderNav(); });
-    slot.appendChild(e); return;
-  }
+  renderAside();
+  if (window.__live) return;   // live: the nav camera is replaced by the live sidebar (aside "Your live stream viewers")
   const b = document.createElement('button'); b.type = 'button'; b.className = 'green'; b.id = 'camera';
   if (!Q.has('noaria') && !Q.has('plain')) b.setAttribute('aria-label', 'Go live');
   b.innerHTML = '<svg ' + (Q.has('plain') ? '' : 'class="lucide lucide-video" ') + 'width="24" height="24" stroke="currentColor" fill="none"><rect x="2" y="6" width="14" height="12"/><path d="m16 13 6 4V7l-6 4"/></svg>';
@@ -69,25 +67,40 @@ function renderAudience(d){
   d.appendChild(cr);
 }
 let encDlg = null;
+// v2.7.1: the VERIFIED "Connect your encoder" dialog (captured from the signed-in site). There is no further confirm step: the
+// stream exists once created; "Done" (a plain button, enabled immediately) and the X ("Close modal") both close it and stay live.
 function renderEncoder(){
   portal.innerHTML = '';
   const d = encDlg = document.createElement('div'); d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true'); d.setAttribute('aria-label','Connect your encoder');
-  d.innerHTML = '<h2>Connect your encoder</h2><p class="st">Waiting for your encoder…</p>' +
-    '<label>Server URL</label><div><input readonly value="rtmp://media.epikchat.com:1935/x"></div>' +
-    '<label>Stream key</label><div><span class="key">••••••••••••</span><button type="button" id="show">Show stream key</button></div>' +
-    '<div><button type="button" id="cancel">Cancel</button><button type="button" id="final" disabled>Go live</button></div>';
+  d.innerHTML = '<button type="button" aria-label="Close modal" id="x"><svg width="12" height="12"></svg></button><h2>Connect your encoder</h2>' +
+    '<label>Server</label><div><input type="text" readonly value="rtmp://media.epikchat.com:1935/x"><button type="button" aria-label="Copy server url"><svg width="12" height="12"></svg></button></div>' +
+    '<label>Stream key</label><div><input type="password" readonly id="key" value="' + window.__session.key + '"><button type="button" aria-label="Show stream key" id="show"><svg width="12" height="12"></svg></button><button type="button" aria-label="Copy stream key"><svg width="12" height="12"></svg></button></div>' +
+    '<div><button type="button" id="done">Done</button></div>';
   portal.appendChild(d);
-  d.querySelector('#show').addEventListener('click', () => later(() => { d.querySelector('.key').outerHTML = '<code class="key">' + window.__session.key + '</code>'; }));
-  d.querySelector('#cancel').addEventListener('click', () => { window.__cancelled = true; portal.remove(); portal = null; window.__session = null; });
-  d.querySelector('#final').addEventListener('click', () => { window.__finalClicks++; later(() => { window.__live = true; portal.remove(); portal = null; encDlg = null; renderNav(); }); });
+  d.querySelector('#show').addEventListener('click', () => later(() => { d.querySelector('#key').type = 'text'; }));
+  const close = () => { window.__live = true; if (portal) portal.remove(); portal = null; encDlg = null; renderNav(); };
+  d.querySelector('#x').addEventListener('click', () => { window.__xClicks = (window.__xClicks || 0) + 1; later(close); });
+  d.querySelector('#done').addEventListener('click', () => { window.__doneClicks++; window.__finalClicks = window.__doneClicks; later(close); });
 }
-// what the RTMP ingest would answer for a publish with `key`
+window.__doneClicks = 0;
+// the live sidebar (VERIFIED): aside "Your live stream viewers"
+function renderAside(){
+  let a = document.getElementById('liveaside'); if (a) a.remove();
+  if (!window.__live) return;
+  a = document.createElement('aside'); a.id = 'liveaside'; a.setAttribute('aria-label', 'Your live stream viewers');
+  a.innerHTML = '<span aria-label="' + (window.__audience && /private/i.test(window.__audience) ? 'private' : 'public') + ' live stream">LIVE</span>' +
+    '<img alt="" aria-label="0 viewers watching your live stream" role="img" width="10" height="10">' +
+    '<button type="button">Stream credentials</button><button type="button">Preview stream</button><button type="button" aria-label="Open Live stream options">⋯</button><button type="button" aria-label="End live stream" id="end">■</button>' +
+    '<section role="region" aria-label="Viewers"><input type="search" aria-label="Search viewers" placeholder="Search viewers"><p>No viewers yet</p></section>';
+  document.body.appendChild(a);
+  a.querySelector('#end').addEventListener('click', () => { window.__endClicks = (window.__endClicks || 0) + 1; });
+}
+// what the RTMP ingest would answer for a publish with `key` (the session is live from creation; no confirm step)
 window.__mockIngest = key => {
   let r;
-  if (window.__live && window.__session && key === window.__session.key) r = 'accepted (live)';
-  else if (!window.__session) r = 'refused: no live session';
+  if (!window.__session) r = 'refused: no live session';
   else if (key !== window.__session.key) r = 'refused: wrong key';
-  else { r = 'accepted'; if (encDlg) later(() => { encDlg.querySelector('.st').textContent = 'Encoder connected — receiving video'; encDlg.querySelector('#final').disabled = false; }); }
+  else r = window.__live ? 'accepted (live)' : 'accepted';
   window.__ingest.push(r); return r;
 };
 if (Q.has('live')) { window.__live = true; window.__session = { key: 'FAKE_mock_Key_12345abc' }; }

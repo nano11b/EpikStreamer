@@ -227,9 +227,10 @@ static class SelfTest
             Check(Ev("__mockIngest('" + Saved + "')").Contains("wrong key"), "old saved key would be refused (so replacing it matters)");
             var fin = ls.FinalizeAsync(30);
             await Task.Delay(1200);
-            Check(Ev("__mockIngest('" + r.Key + "')") == "\"accepted\"", "ingest accepted with the new key once the session exists");
+            Check(Ev("__mockIngest('" + r.Key + "')").StartsWith("\"accepted"), "ingest accepted with the new key once the session exists");
             var fr = await fin; P("  finalize: " + fr);
-            Check(Ev("__finalClicks") == "1" && Ev("__live") == "true" && Ev("!!window.__cancelled") == "false", "final confirm clicked once (never Cancel), page is live");
+            Check(Ev("__doneClicks") == "1" && Ev("window.__xClicks || 0") == "0" && Ev("window.__endClicks || 0") == "0" && Ev("__live") == "true" && Ev("!!window.__cancelled") == "false", "encoder dialog \"Done\" clicked exactly once (never X / Cancel / End), page is live");
+            Check(Ev("!!document.querySelector('aside[aria-label=\"Your live stream viewers\"]')") == "true" && fr.Contains("Your live stream viewers"), "live detected by the \"Your live stream viewers\" sidebar");
             var r2 = await ls.EnsureAsync(aud, r.Key, 20);
             Check(r2.Outcome == LiveSession.Outcome.AlreadyLive && Ev("__creates") == "1", "second Start: detected live, no duplicate session (" + r2.Message + ")");
             var dg = await chat.Diagnostics() ?? "";

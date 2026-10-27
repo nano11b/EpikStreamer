@@ -21,12 +21,14 @@ for q in "" "?noaria=1" "?plain=1" "?live=1"; do
       if (r.state !== 'done' && !s.Optional) { ok = false; break; }
     }
     for (let i = 0; i < 20 && ok; i++) { key = E.read(); if (key.key) break; E.step('showkey'); await sleep(500); }
+    // v2.7.1: like EnsureAsync, click the encoder dialog's "Done" right after reading the key (no other confirm step)
+    for (let i = 0; i < 20 && ok; i++) { const r = E.step('closeEncoder'); log.push('closeEncoder: ' + r.state + ' (' + r.info + ')'); if (r.state === 'clicked' || r.state === 'done') break; await sleep(500); }
   }
   const ing = key.key ? __mockIngest(key.key) : '';
   let fin = '';
   for (let i = 0; i < 40 && !st0.live; i++) { await sleep(500); const r = E.step('finalize'); fin = r.state + ' ' + r.info; if (E.live().live) break; }
   const st1 = E.live(); const diag = E.goLiveDiag();
-  document.title = JSON.stringify({ ok, before, ing, st0, st1, fin, key, creates: __creates, golive: __golive, finals: __finalClicks, cancelled: !!window.__cancelled,
+  document.title = JSON.stringify({ ok, before, ing, st0, st1, fin, key, creates: __creates, golive: __golive, finals: __finalClicks, dones: __doneClicks, xs: window.__xClicks || 0, ends: window.__endClicks || 0, v271: (diag.selectors||{}).v271, cancelled: !!window.__cancelled,
     chosen: window.__chosen || '', audience: window.__audience || '', diagVerified: diag.verified ?? (diag.selectors||{}).verified, log });
 })();
 JS
@@ -36,9 +38,9 @@ import sys,re,json,html
 d=json.loads(html.unescape(re.search(r'<title>(.*?)</title>',sys.stdin.read(),re.S).group(1)))
 for l in d['log']: print('  ',l)
 q='$q'; aud='$aud'
-if 'live' in q: ok=d['st0']['live'] and d['creates']==0 and d['golive']==0
-else: ok=(d['ok'] and 'no live session' in d['before'] and d['ing']=='accepted' and d['creates']==1 and d['golive']==1 and 'RTMP encoder' in d['chosen']
-   and aud in d['audience'] and d['key'].get('key')=='FAKE_session1_Key_9z8y' and d['finals']==1 and not d['cancelled'] and d['st1']['live'])
+if 'live' in q: ok=d['st0']['live'] and 'Your live stream viewers' in d['st0']['how'] and d['creates']==0 and d['golive']==0 and d['dones']==0 and d['ends']==0
+else: ok=(d['ok'] and 'no live session' in d['before'] and d['ing'].startswith('accepted') and d['creates']==1 and d['golive']==1 and 'RTMP encoder' in d['chosen']
+   and aud in d['audience'] and d['key'].get('key')=='FAKE_session1_Key_9z8y' and d['dones']==1 and d['xs']==0 and d['ends']==0 and not d['cancelled'] and d['st1']['live'] and 'Your live stream viewers' in d['st1']['how'] and d['v271']['verified'])
 print('PASS' if ok else 'FAIL', 'chrome go-live session mock', q or '(nav camera)', aud, '|', d['fin'], '|', d['st1']['how'])
 if not ok: print(json.dumps(d)[:1500])
 sys.exit(0 if ok else 1)"

@@ -182,6 +182,24 @@
     if (!n) n = ((r.innerText || r.textContent || '').trim().split('\n')[0] || '');
     return n.replace(/\s+/g, ' ').trim().slice(0, 40);
   };
+  // v2.7.1 VERIFIED container: <aside aria-label="Your live stream viewers"> → region "Viewers" (a "Search viewers" box, then
+  // rows or "No viewers yet"). Row markup is still unknown, so rows are read generically.
+  const named = (e, re) => { const al = e.getAttribute('aria-label'); if (al) return re.test(al.trim());
+    const ids = (e.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean); return ids.length > 0 && re.test(ids.map(i => (document.getElementById(i) || {}).textContent || '').join(' ').trim()); };
+  const liveAside = () => [...document.querySelectorAll('aside, [role="complementary"]')].find(e => named(e, /^your live stream viewers$/i)) || null;
+  const liveViewersRegion = () => { const a = liveAside(); if (!a) return null;
+    return [...a.querySelectorAll('[role="region"], section')].find(e => named(e, /^viewers$/i)) || a; };
+  const namesInRegion = reg => {
+    if (/^\s*no viewers yet\s*$/im.test(reg.innerText || reg.textContent || '') && !reg.querySelector('[role="listitem"], li')) return [];
+    let rows = [...reg.querySelectorAll('[role="listitem"], li, [role="row"], [role="option"]')].filter(r => !r.parentElement.closest('[role="listitem"], li, [role="row"], [role="option"]'));
+    if (!rows.length) rows = [...reg.querySelectorAll('button, a')].filter(b => !/search|close|copy|show|stream|options|end live|preview|credentials/i.test(b.getAttribute('aria-label') || b.textContent || ''));
+    const nm = r => { const al = (r.getAttribute('aria-label') || (r.querySelector('[aria-label]') || { getAttribute: () => '' }).getAttribute('aria-label') || '').trim();
+      let n = /^Open (.+?)('s profile)?$/i.exec(al)?.[1] || /^(.+?)'s profile$/i.exec(al)?.[1] || '';
+      if (!n) n = ((r.innerText || r.textContent || '').trim().split('\n')[0] || '');
+      n = n.replace(/\s+/g, ' ').trim(); return /^(no viewers yet|search viewers|viewers)$/i.test(n) ? '' : n.slice(0, 40); };
+    return [...new Set(rows.filter(r => !r.closest('input, [role="searchbox"], [role="textbox"]')).map(nm).filter(Boolean))];
+  };
+  window.__epikLiveAside = liveAside;
   const viewersList = () => {
     let el = null; try { el = [...document.querySelectorAll(S.viewers)].find(shown) || null; } catch { }
     if (!el) {   // heading "Viewers" (optionally with a count) followed by a list
@@ -193,8 +211,9 @@
   const namesIn = list => list ? [...new Set([...list.querySelectorAll(S.memberRow)].filter(r => !r.parentElement.closest(S.memberRow)).map(rowName).filter(Boolean))] : null;
   const vst = { last: {}, at: 0 };
   const scanViewers = () => {
-    for (const [source, list] of [['LiveViewers', viewersList()], ['RoomMembers', memberList()]]) {
-      const names = namesIn(list); if (!names) continue;
+    const reg = liveViewersRegion();
+    for (const [source, list] of [['LiveViewers', reg || viewersList()], ['RoomMembers', memberList()]]) {
+      const names = list && list === reg ? namesInRegion(reg) : namesIn(list); if (!names) continue;
       const key = names.slice().sort().join('\n');
       if (vst.last[source] === key && Date.now() - vst.at < 30000) continue;
       vst.last[source] = key; vst.at = Date.now();
@@ -203,7 +222,7 @@
   };
   CFG.viewerDiag = () => {
     const v = viewersList(), m = document.querySelector(S.members);
-    return { verified: false, viewersSelectorHits: (() => { try { return document.querySelectorAll(S.viewers).length; } catch { return 'bad selector'; } })(),
+    return { verified: false, liveViewersAside: !!liveAside(), liveViewersRegion: (() => { const r = liveViewersRegion(); return r ? (r === liveAside() ? 'aside only' : 'region') : null; })(), viewersSelectorHits: (() => { try { return document.querySelectorAll(S.viewers).length; } catch { return 'bad selector'; } })(),
       viewersFound: !!v, viewersCount: v ? (namesIn(v) || []).length : 0, viewersSkeleton: skel(v, 5, { n: 40 }),
       membersFound: !!m, membersCount: m ? (namesIn(m) || []).length : 0, ballPit: ballPitDiag() };
   };
@@ -224,11 +243,12 @@
   window.__epikSwitchRoom = name => {
     const want = String(name || '').trim().toLowerCase(); if (!want) return 'no name';
     if ((st.room || '').trim().toLowerCase() === want) return 'clicked';
-    const log = findLog();
+    const log = findLog(); const VIEWERS_ASIDE = 'aside[aria-label="Your live stream viewers" i]';
     const cands = [...document.querySelectorAll('a, button, [role="link"], [role="tab"], [role="treeitem"], [role="option"], [role="menuitem"], [role="listitem"]')]
-      .filter(e => shown(e) && !(log && log.contains(e)) && !e.closest(S.members) && !e.closest('[role="dialog"]'));
+      .filter(e => shown(e) && !(log && log.contains(e)) && !e.closest(S.members) && !e.closest('[role="dialog"]') && !e.closest(VIEWERS_ASIDE));
     const lbl = e => ((e.getAttribute('aria-label') || '').trim() || (e.textContent || '').replace(/\s+/g, ' ').trim()).toLowerCase();
-    const hit = cands.find(e => lbl(e) === want) || cands.find(e => lbl(e).replace(/^#\s*/, '').replace(/\s*\d+$/, '') === want);
+    // v2.7.1 (verified): the sidebar rail's room buttons carry the room name as their accessible name, e.g. "The_Bar_Alc_420"
+    const hit = cands.find(e => (e.getAttribute('aria-label') || '').trim().toLowerCase() === want) || cands.find(e => lbl(e) === want) || cands.find(e => lbl(e).replace(/^#\s*/, '').replace(/\s*\d+$/, '') === want);
     if (!hit) return 'room not found in the room list';
     hit.click(); setTimeout(schedule, 300); return 'clicked';
   };

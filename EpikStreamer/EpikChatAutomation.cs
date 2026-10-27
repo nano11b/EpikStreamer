@@ -38,7 +38,7 @@ public static class EpikChatAutomation
     /// <summary>Helper injected into the page: window.__epik.step(id, arg), .read(), .click(patterns), .loggedIn(), .dialog().</summary>
     public const string HelperJs = """
 (() => {
-  if (window.__epik && window.__epik.v === 4) return 'ready';
+  if (window.__epik && window.__epik.v === 5) return 'ready';
   const txt = e => (e && e.textContent || '').replace(/\s+/g, ' ').trim();
   const vis = e => { if (!e || !e.isConnected) return false; if (e.closest('[aria-hidden="true"]')) return false;
     const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
@@ -99,17 +99,23 @@ public static class EpikChatAutomation
   };
   const liveState = () => {
     const d = dialog(); const st = stage(d);
-    const endB = [...document.querySelectorAll('button,a,[role=button],[role=status]')].filter(vis).find(b => LIVE_NAME.test(nameOf(b)));
+    // v2.7.1 VERIFIED: while live the sidebar shows <aside aria-label="Your live stream viewers"> with an "End live stream" button
+    const aside = [...document.querySelectorAll('aside,[role=complementary]')].find(a => (a.getAttribute('aria-label') || '').trim().toLowerCase() === 'your live stream viewers');
+    const endLive = [...document.querySelectorAll('button,[role=button]')].find(b => nameOf(b).toLowerCase() === 'end live stream');
+    const endB = endLive || [...document.querySelectorAll('button,a,[role=button],[role=status]')].filter(vis).find(b => LIVE_NAME.test(nameOf(b)));
     const g = findGoLive();
     const active = g && ['aria-pressed', 'aria-current', 'data-active', 'data-live'].some(a => g.el.getAttribute(a) === 'true') || (g && g.el.getAttribute('data-state') === 'active');
     const flag = [...document.querySelectorAll('[data-live="true"],[data-streaming="true"],[data-broadcasting="true"]')].find(vis);
     let live = false, how = '';
-    if (endB) { live = true; how = 'button "' + nameOf(endB) + '"'; }
+    if (aside) { live = true; how = 'aside "Your live stream viewers"'; }
+    else if (endB) { live = true; how = 'button "' + nameOf(endB) + '"'; }
     else if (active) { live = true; how = 'Go live button is active (' + g.how + ')'; }
     else if (flag) { live = true; how = 'element ' + flag.tagName.toLowerCase() + '[data-live]'; }
     return { live, how, session: live || st === 'encoder', stage: st, dialog: dlgLabel(d), golive: g ? g.how : '', loggedIn: !/\/login/i.test(location.pathname) && !document.querySelector('input[type=password]') };
   };
-  const GOLIVE_SEL = { strong: GL_STRONG.source, navWeak: GL_WEAK.source, live: LIVE_NAME.source, nav: NAV, icon: 'svg/img class|data-icon|href ~ video|camera|webcam|broadcast|go-live|stream', green: 'icon-only nav button with a green color', verified: false };
+  const GOLIVE_SEL = { strong: GL_STRONG.source, navWeak: GL_WEAK.source, live: LIVE_NAME.source, nav: NAV, icon: 'svg/img class|data-icon|href ~ video|camera|webcam|broadcast|go-live|stream', green: 'icon-only nav button with a green color', verified: false,
+    v271: { verified: true, encoderDialog: '[role=dialog][aria-label="Connect your encoder"]', done: 'button, trimmed textContent === "Done"', liveAside: 'aside[aria-label="Your live stream viewers"]', endLive: 'button "End live stream"', credentials: 'button "Stream credentials"' } };
+  const encoderDialog = () => [...document.querySelectorAll('[role=dialog]')].find(d => (d.getAttribute('aria-label') || '').trim() === 'Connect your encoder') || null;
 
   const steps = {
     golive() {
@@ -157,33 +163,31 @@ public static class EpikChatAutomation
     },
     // after "Connect your encoder": click a final "Go live"/"Start streaming" button once it is enabled (UNVERIFIED: the real
     // dialog may not have one); report whether the page says the ingest was detected.
+    // v2.7.1 VERIFIED: "Connect your encoder" has no further confirm step; its plain "Done" button (enabled immediately) closes
+    // it and the stream stays live (so does the X). finalize = click Done if the dialog is still open, else report live state.
     finalize() {
-      const d = dialog(); const st = stage(d); const ls = liveState();
-      if (st !== 'encoder') return res(ls.live ? 'done' : 'none', ls.live ? 'live (' + ls.how + ')' : 'no encoder dialog', d);
-      const bs = buttons(d).filter(b => !b.disabled && b.getAttribute('aria-disabled') !== 'true');
-      const go = bs.find(b => /^(go live|go live now|start (the )?(live ?)?stream(ing)?|start broadcast(ing)?|publish( stream)?|i'?m ready)$/i.test(nameOf(b)));
-      if (go) return clickOnce('finalize', go, d, '"' + nameOf(go) + '"');
-      const t = txt(d);
-      const connected = /(encoder (is )?connected|receiving (video|your stream|data)|stream (is )?(detected|connected|received|live)|signal (detected|received)|you('|’)?re live|you are live)/i.test(t);
-      const done = bs.find(b => /^(done|finish(ed)?|got it)$/i.test(txt(b)));
-      return res(connected ? 'connected' : 'waiting', (connected ? 'ingest detected' : 'waiting for the ingest') + (done ? '; "' + txt(done) + '" available' : ''), d);
+      const ed = encoderDialog(); const ls = liveState();
+      if (!ed) return res(ls.live ? 'done' : 'none', ls.live ? 'live (' + ls.how + ')' : 'no encoder dialog', dialog());
+      return this.closeEncoder();
     },
-    // close the encoder dialog only through a positive "Done"/"Finish"/"Got it" button; never Cancel / End / ×
+    // close the encoder dialog only through its "Done" button; never Close modal / Cancel / End
     closeEncoder() {
-      const d = dialog(); if (stage(d) !== 'encoder') return res('done', '', d);
-      const b = buttons(d).find(b => /^(done|finish(ed)?|got it)$/i.test(txt(b)));
+      const ed = encoderDialog(); const d = ed || dialog();
+      if (!ed && stage(d) !== 'encoder') return res('done', '', d);
+      const bs = [...(ed || d).querySelectorAll('button')];
+      const b = bs.find(b => (b.textContent || '').trim() === 'Done') || buttons(d).find(b => /^(done|finish(ed)?|got it)$/i.test(txt(b)));
       return b ? clickOnce('closeEncoder', b, d, '"' + txt(b) + '"') : res('notfound', 'no Done button; dialog left open', d);
     },
     showkey() {
       const r = window.__epik.read(); if (r.key) return res('done', 'key visible');
       const d = dialog();
-      const b = buttons(d || document).find(b => /^(show|reveal)( stream)? key$/i.test(txt(b)) || /^show$/i.test(txt(b)));
+      const b = buttons(d || document).find(b => /^(show|reveal)( stream)? key$/i.test(nameOf(b)) || /^(show|reveal)( stream)? key$/i.test(txt(b)) || /^show$/i.test(txt(b)));
       return b ? clickOnce('showkey', b, d, '"Show stream key"') : res('notfound', 'no "Show stream key" button');
     },
   };
 
   window.__epik = {
-    v: 4,
+    v: 5,
     live() { try { return liveState(); } catch (e) { return { live: false, how: 'error ' + e, session: false, stage: '', dialog: '', golive: '', loggedIn: true }; } },
     goLiveDiag() { const ls = this.live(); return { ...ls, selectors: GOLIVE_SEL }; },
     dialog() { const d = dialog(); return { label: dlgLabel(d), stage: stage(d) }; },
@@ -429,12 +433,30 @@ public sealed class LiveSession
                 return new(Outcome.Failed, "Live session created but the stream key wasn't found on the page. " + Fallback);
             }
             if (server.Length == 0) server = EpikChatAutomation.ExpectedServer;
+            // v2.7.1: the encoder dialog's "Done" is the last step (the stream is live once created; Done/X both keep it live)
+            var doneMsg = await CloseEncoderAsync(ct);
+            Status("EpikChat encoder dialog: " + doneMsg, false);
             bool changed = !string.Equals(key, savedKey?.Trim(), StringComparison.Ordinal);
             Status(changed ? "Live session ready (EpikChat issued a different stream key; using it)" : "Live session ready", false);
             return new(Outcome.Created, changed ? "created, new key" : "created, same key", server, key, changed);
         }
         catch (OperationCanceledException) { return new(Outcome.Failed, "Go live cancelled."); }
         catch (Exception ex) { return new(Outcome.Failed, "Go live automation error: " + ex.Message + ". " + Fallback); }
+    }
+
+    async Task<string> CloseEncoderAsync(CancellationToken ct)
+    {
+        for (int i = 0; i < 20; i++)
+        {
+            await EnsureHelper();
+            var c = await Js("window.__epik.step('closeEncoder', '')");
+            var st = S(c, "state");
+            if (st == "clicked") return "clicked Done";
+            if (st == "done") return i == 0 ? "already closed" : "closed";
+            if (st == "notfound") return "no Done button (" + S(c, "info") + ")";
+            await Task.Delay(PollMs, ct);   // "waiting" = clickOnce gap; the dialog closes after the click
+        }
+        return "Done click not confirmed";
     }
 
     /// <summary>After ffmpeg started: while the encoder dialog is open, click a final "Go live"/"Start streaming" button once it
@@ -454,11 +476,6 @@ public sealed class LiveSession
                 if (state == "done") return "live on EpikChat: " + info;
                 if (state == "none") return "no encoder dialog open";
                 if (state == "clicked") Status("Clicked " + info + " on EpikChat", false);
-                if (state == "connected")
-                {
-                    var c = await Js("window.__epik.step('closeEncoder', '')");
-                    return "ingest detected" + (S(c, "state") == "clicked" ? "; closed the encoder dialog" : "; encoder dialog left open");
-                }
                 await Task.Delay(PollMs * 2, ct);
             }
         }
