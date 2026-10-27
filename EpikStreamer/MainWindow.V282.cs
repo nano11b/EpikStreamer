@@ -9,6 +9,8 @@ public partial class MainWindow
     bool _srcSync;
     void Init282()
     {
+        // 2.8.2: remember the chat column width when the splitter is dragged
+        ChatSplitter.DragCompleted += (_, _) => { if (ChatColumn.ActualWidth >= ChatLayout.MinColumn) { _store.ChatWidth = (int)ChatColumn.ActualWidth; try { _store.Save(); } catch { } } };
         SrcKind.SelectionChanged += (_, _) => SrcKindChanged();
         BpMode.SelectionChanged += (_, _) => SyncSourceFromPit();
         Tabs.SelectionChanged += (_, _) => { if (!_srcSync) RefreshSourceNote(); };

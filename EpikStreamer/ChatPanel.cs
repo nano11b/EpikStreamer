@@ -69,7 +69,16 @@ public class ChatPanel : DockPanel
     }
     async Task<bool> ClickRoom(string name)
     {
-        try { return JsonSerializer.Deserialize<string>(await EvalJs("window.__epikSwitchRoom ? window.__epikSwitchRoom(" + JsonSerializer.Serialize(name) + ") : 'no-helper'")) == "clicked"; }
+        try
+        {
+            for (int i = 0; i < 3; i++)
+            {   // 2.8.2: "revealed" = the page was narrow and we opened its collapsed room list; give it a moment and look again
+                var r = JsonSerializer.Deserialize<string>(await EvalJs("window.__epikSwitchRoom ? window.__epikSwitchRoom(" + JsonSerializer.Serialize(name) + ") : 'no-helper'"));
+                if (r != "revealed") return r == "clicked";
+                await Task.Delay(700);
+            }
+            return false;
+        }
         catch { return false; }
     }
     /// <summary>Sanitized tap diagnostics: event names + field names/types only (no text, names, tokens or cookies).</summary>
@@ -79,6 +88,8 @@ public class ChatPanel : DockPanel
         try { return JsonSerializer.Deserialize<string>(await EvalJs("window.__epikTapDiag ? JSON.stringify(window.__epikTapDiag()) : 'null'")); } catch { return null; }
     }
     Task<string> EvalJs(string js) => _web.CoreWebView2.ExecuteScriptAsync(js);
+    /// <summary>2.8.2: zoom out a narrow docked panel so EpikChat still sees ≥ 984 CSS px (its desktop layout with the room list).</summary>
+    void FitZoom() { try { var z = Core.ChatLayout.Zoom(_web.ActualWidth); if (Math.Abs(_web.ZoomFactor - z) > 0.005) _web.ZoomFactor = z; } catch { } }
     string? _tapScriptId;
     string? _chatScriptId; DateTime _lastSend = DateTime.MinValue; readonly SemaphoreSlim _sendLock = new(1, 1);
     public bool IsLoaded2 => _initialized && _wantVisible && !WebViewHost.IsSignInOpen;
@@ -124,6 +135,7 @@ public class ChatPanel : DockPanel
             if (!_initialized)
             {
                 await _web.EnsureCoreWebView2Async(await WebViewHost.GetEnvironmentAsync());
+                FitZoom(); _web.SizeChanged += (_, _) => FitZoom();
                 var core = _web.CoreWebView2;
                 core.Settings.AreDevToolsEnabled = false;
                 core.NewWindowRequested += (_, e) => { e.Handled = true; WebViewHost.OpenExternal(e.Uri); };   // never a second WebView window

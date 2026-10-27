@@ -72,3 +72,6 @@ python3 rooms-check.py "$out/rooms.json"
 python3 engage-check.py "$out/engage.json"
 # v2.8.2: Start with an empty playlist, Ball Pit scene as the source, radio off (local file output)
 "$B" --selftest-pitonly "$out/pitonly.flv"
+# v2.8.2: room-switch replies in EpikChat's narrow layout (room rail collapsed behind a menu)
+"$B" --selftest-rooms . "$out/rooms-mobile.json" mobile
+python3 rooms-check.py "$out/rooms-mobile.json"

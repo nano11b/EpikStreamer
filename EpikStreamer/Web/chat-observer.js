@@ -251,7 +251,16 @@
     const lbl = e => norm((e.getAttribute('aria-label') || '').trim() || (e.textContent || ''));
     // v2.7.1 (verified): the sidebar rail's room buttons carry the room name as their accessible name, e.g. "The_Bar_Alc_420"
     const hit = cands.find(e => norm(e.getAttribute('aria-label')) === want) || cands.find(e => lbl(e) === want) || cands.find(e => lbl(e).replace(/^#\s*/, '').replace(/\s*\d+$/, '') === want);
-    if (!hit) return 'room not found in the room list';
+    if (!hit) {
+      // 2.8.2: narrow window (EpikChat hides its room rail below 968 px): open the collapsed room list/menu first, the caller retries
+      if (!document.querySelector('.chat-workspace-rail') || !shown(document.querySelector('.chat-workspace-rail'))) {
+        const MENU = /^(open |show |toggle |expand )?(the )?(main )?(menu|navigation|nav|sidebar|side bar|rooms|room list|your rooms|conversations|conversation list|chats|channels)( menu| list)?$/i;
+        const t = [...document.querySelectorAll('button,[role="button"]')].filter(e => shown(e) && e.getAttribute('aria-expanded') !== 'true' && !(log && log.contains(e)) && !e.closest('[role="dialog"]'))
+          .find(e => MENU.test(((e.getAttribute('aria-label') || e.getAttribute('title') || e.textContent || '') + '').replace(/\s+/g, ' ').trim()));
+        if (t && !window.__epikRevealedAt || t && Date.now() - window.__epikRevealedAt > 1200) { window.__epikRevealedAt = Date.now(); t.click(); return 'revealed'; }
+      }
+      return 'room not found in the room list';
+    }
     hit.click(); setTimeout(schedule, 300); return 'clicked';
   };
 

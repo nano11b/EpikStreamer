@@ -153,6 +153,9 @@ public class ProfileStore
     public string? ProtectedGitHubToken { get; set; }   // optional, DPAPI; only for GitHub API rate limits
     public bool ChatPanelVisible { get; set; }
     public bool ChatCompact { get; set; } = true;
+    // 2.8.2: chat window (Linux) / chat column (Windows) size; 0 = default. See ChatLayout.
+    public int ChatWidth { get; set; }
+    public int ChatHeight { get; set; }
     // v2.2
     public string Theme { get; set; } = "Dark";          // Dark | Light | Midnight Blue | Epik Purple
     public bool MinimizeToTray { get; set; } = true;

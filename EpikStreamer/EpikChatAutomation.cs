@@ -38,7 +38,7 @@ public static class EpikChatAutomation
     /// <summary>Helper injected into the page: window.__epik.step(id, arg), .read(), .click(patterns), .loggedIn(), .dialog().</summary>
     public const string HelperJs = """
 (() => {
-  if (window.__epik && window.__epik.v === 5) return 'ready';
+  if (window.__epik && window.__epik.v === 6) return 'ready';
   const txt = e => (e && e.textContent || '').replace(/\s+/g, ' ').trim();
   const vis = e => { if (!e || !e.isConnected) return false; if (e.closest('[aria-hidden="true"]')) return false;
     const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
@@ -85,6 +85,10 @@ public static class EpikChatAutomation
   const greenish = e => { for (const x of [e, ...e.querySelectorAll('svg,svg *,span')].slice(0, 8)) { const cs = getComputedStyle(x);
       for (const c of [cs.color, cs.backgroundColor, cs.stroke, cs.fill]) { const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || ''); if (m) { const r = +m[1], g = +m[2], b = +m[3]; if (g > 110 && g > r + 40 && g > b + 15) return true; } } } return false; };
   const clickables = () => [...document.querySelectorAll('button,a,[role=button]')].filter(vis).filter(b => !b.closest('[role=dialog],[role=alertdialog]'));
+  // 2.8.2: in EpikChat's narrow layout (< 968 px) the room rail / nav collapse behind a menu button; open it once to find things
+  const MENU = /^(open |show |toggle |expand )?(the )?(main )?(menu|navigation|nav|sidebar|side bar|rooms|room list|your rooms|conversations|conversation list|chats|channels|more|more options)( menu| list)?$/i;
+  const reveal = () => { const b = clickables().filter(x => x.getAttribute('aria-expanded') !== 'true').find(x => MENU.test(nameOf(x))); if (!b) return ''; press(b); return nameOf(b); };
+  const narrow = () => window.innerWidth < 968;
   const findGoLive = () => {
     const all = clickables();
     const strong = all.filter(b => GL_STRONG.test(nameOf(b)) || GL_STRONG.test(accName(b)));
@@ -121,7 +125,15 @@ public static class EpikChatAutomation
     golive() {
       const d = dialog(); if (ORDER[stage(d)] >= 1) return res('done', '', d);
       const g = findGoLive();
-      return g ? clickOnce('golive', g.el, d, 'Go live (' + g.how + ')') : res('notfound', 'no Go live / camera button found in the nav', d);
+      if (!g && !throttled('reveal')) { const m = reveal(); if (m) return res('waiting', 'opened "' + m + '" to find Go live (page is ' + window.innerWidth + ' px wide)', d); }
+      return g ? clickOnce('golive', g.el, d, 'Go live (' + g.how + ')' + (narrow() ? ' [narrow layout ' + window.innerWidth + ' px]' : '')) : res('notfound', 'no Go live / camera button found in the nav' + (narrow() ? ' (narrow layout, ' + window.innerWidth + ' px)' : ''), d);
+    },
+    reveal() { return throttled('reveal') ? res('waiting', 'menu opened recently') : (m => m ? res('clicked', m) : res('notfound', 'no menu button'))(reveal()); },
+    // 2.8.2: while live, the sidebar's "Stream credentials" button (v2.7.1 verified) shows the current session's server + key
+    credentials() {
+      if (window.__epik.read().key) return res('done', 'key visible');
+      const b = [...document.querySelectorAll('button,[role=button]')].filter(vis).find(b => nameOf(b).toLowerCase() === 'stream credentials');
+      return b ? clickOnce('credentials', b, dialog(), '"Stream credentials"') : res('notfound', 'no "Stream credentials" button');
     },
     source() {
       const d = dialog(); const st = stage(d);
@@ -187,7 +199,8 @@ public static class EpikChatAutomation
   };
 
   window.__epik = {
-    v: 5,
+    v: 6,
+    width() { return { w: window.innerWidth, h: window.innerHeight, narrow: narrow() }; },
     live() { try { return liveState(); } catch (e) { return { live: false, how: 'error ' + e, session: false, stage: '', dialog: '', golive: '', loggedIn: true }; } },
     goLiveDiag() { const ls = this.live(); return { ...ls, selectors: GOLIVE_SEL }; },
     dialog() { const d = dialog(); return { label: dlgLabel(d), stage: stage(d) }; },
@@ -280,13 +293,14 @@ public static class EpikChatAutomation
         return "window.__EPIK_TAP_CFG = " + cfg.ToJsonString() + ";\n" + rd.ReadToEnd();
     }
 
-    /// <summary>Compact mode: hide site chrome (header/nav/footer/ads) and tighten spacing so chat fits a narrow panel. UNTESTED.</summary>
+    /// <summary>"Compact chat" (Chat tab, on by default). 2.8.2: it used to hide header/nav/footer and every "*sidebar*" element,
+    /// which also hid EpikChat's top bar (Go live), its room rail and parts of the member list. Now it only trims ads/cookie
+    /// notices and tightens spacing; navigation, the room rail, the member list and the top bar are never hidden.</summary>
     public const string CompactCss = """
-header, nav, footer, .navbar, .site-header, .site-footer, [class*='advert' i], [id*='advert' i], [class*='banner' i], [class*='cookie' i] { display: none !important; }
-body { font-size: 13px !important; min-width: 0 !important; }
-[class*='sidebar' i]:not([class*='chat' i]):not([class*='user' i]) { display: none !important; }
-[class*='message' i] { padding-top: 2px !important; padding-bottom: 2px !important; margin-top: 0 !important; margin-bottom: 0 !important; }
-img[class*='avatar' i] { width: 22px !important; height: 22px !important; }
+.site-footer, [class*='advert' i], [id*='advert' i], [class*='cookie-banner' i], [class*='cookie-consent' i] { display: none !important; }
+body { font-size: 13px !important; }
+[role='log'] [class*='message' i] { padding-top: 2px !important; padding-bottom: 2px !important; margin-top: 0 !important; margin-bottom: 0 !important; }
+[role='log'] img[class*='avatar' i] { width: 22px !important; height: 22px !important; }
 """;
 
     /// <summary>Injected on every /chat page load. Watches the DOM with a MutationObserver and posts
@@ -375,14 +389,19 @@ public sealed class LiveSession
 
     /// <summary>Detects an existing live session; otherwise runs the Go-live dialog and reads the session's key.
     /// Never creates a second session when one is detected (live indicator or the encoder dialog already open).</summary>
-    public async Task<Result> EnsureAsync(string audience, string? savedKey, int timeoutSec, CancellationToken ct = default)
+    /// <param name="freshKey">2.8.2: the RTMP server refused <paramref name="savedKey"/> ("Publish failed"). Don't accept
+    /// "already live" with that key: read the current session's key from "Stream credentials" if the page still shows a live
+    /// session, otherwise run the whole Go-live flow.</param>
+    public async Task<Result> EnsureAsync(string audience, string? savedKey, int timeoutSec, CancellationToken ct = default, bool freshKey = false)
     {
         var deadline = DateTime.UtcNow.AddSeconds(Math.Max(10, timeoutSec));
         try
         {
             var st = await StateAsync();
             if (!st.LoggedIn) return new(Outcome.Failed, "Not signed in to EpikChat in the chat panel. " + Fallback);
+            if (st.Live && freshKey) return await KeyFromCredentialsAsync(savedKey, deadline, st.How, ct);
             if (st.Live) { Status("Live session ready (already live on EpikChat: " + st.How + ")", false); return new(Outcome.AlreadyLive, "already live: " + st.How); }
+            if (freshKey) Status("The server refused the old stream key; creating a new live session on EpikChat…", false);
             if (st.Stage != "encoder")
             {
                 Status("Opening Go live on EpikChat…", false);
@@ -442,6 +461,27 @@ public sealed class LiveSession
         }
         catch (OperationCanceledException) { return new(Outcome.Failed, "Go live cancelled."); }
         catch (Exception ex) { return new(Outcome.Failed, "Go live automation error: " + ex.Message + ". " + Fallback); }
+    }
+
+    async Task<Result> KeyFromCredentialsAsync(string? savedKey, DateTime deadline, string how, CancellationToken ct)
+    {
+        Status("EpikChat still shows a live session (" + how + ") but the server refused the key; reading its current key…", false);
+        string server = "", key = "";
+        var end = Min(deadline, DateTime.UtcNow.AddSeconds(15));
+        while (DateTime.UtcNow < end && key.Length == 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            await EnsureHelper();
+            var r = await Js("window.__epik.read()"); server = S(r, "server"); key = S(r, "key");
+            if (key.Length == 0) { await Js("window.__epik.step('credentials', '')"); await Js("window.__epik.step('showkey', '')"); await Task.Delay(PollMs * 2, ct); }
+        }
+        if (key.Length > 0) await CloseEncoderAsync(ct);
+        if (key.Length > 0 && !string.Equals(key, savedKey?.Trim(), StringComparison.Ordinal))
+        {
+            Status("Live session ready (EpikChat shows a newer stream key; using it)", false);
+            return new(Outcome.Created, "live, newer key", server.Length > 0 ? server : EpikChatAutomation.ExpectedServer, key, true);
+        }
+        return new(Outcome.Failed, "EpikChat still shows you as live, but the streaming server refuses that session's key. End the live stream in the EpikChat chat panel; the next retry creates a new session with a fresh key.");
     }
 
     async Task<string> CloseEncoderAsync(CancellationToken ct)

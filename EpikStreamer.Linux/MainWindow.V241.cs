@@ -17,7 +17,7 @@ public partial class MainWindow
     void AutoGoLive_Click(object? s, RoutedEventArgs e) { _store.Chat.AutoGoLive = AutoGoLiveCheck.IsChecked == true; try { _store.Save(); } catch { } }
 
     /// <summary>Detect / create the live session. Updates the stored key of the EpikChat outputs when EpikChat shows a different one.</summary>
-    async Task<(LiveSession? Session, LiveSession.Result? Result)> EnsureEpikLiveSession(Profile p, List<OutputTarget> epikOuts, bool reconnect)
+    async Task<(LiveSession? Session, LiveSession.Result? Result)> EnsureEpikLiveSession(Profile p, List<OutputTarget> epikOuts, bool reconnect, bool freshKey = false)
     {
         if (!_store.Chat.AutoGoLive || epikOuts.Count == 0 || _goLiveBusy) return (null, null);
         _goLiveBusy = true;
@@ -34,7 +34,7 @@ public partial class MainWindow
                 GoLiveStatus(m, true); return (null, new LiveSession.Result(LiveSession.Outcome.Failed, m));
             }
             var ls = _chat.NewLiveSession(); ls.Status = (m, err) => GoLiveStatus(m, err);
-            var r = await ls.EnsureAsync(p.Audience, _keys.GetValueOrDefault(epikOuts[0], ""), _store.Chat.GoLiveTimeoutSeconds);
+            var r = await ls.EnsureAsync(p.Audience, _keys.GetValueOrDefault(epikOuts[0], ""), _store.Chat.GoLiveTimeoutSeconds, default, freshKey);
             if (r.Outcome == LiveSession.Outcome.Failed)
             {
                 GoLiveStatus(r.Message, true);
@@ -71,9 +71,11 @@ public partial class MainWindow
         {
             var epik = enabledOuts.Where(IsEpikOutput).ToList();
             if (!_store.Chat.AutoGoLive || epik.Count == 0) return null;
-            if ((DateTime.UtcNow - _goLiveCreatedUtc).TotalSeconds < 90) return null;   // we just created one: don't stack sessions on a fast retry loop
-            var before = epik.Select(o => _keys.GetValueOrDefault(o, "")).ToList();
-            var (ls, r) = await EnsureEpikLiveSession(run, epik, reconnect: true);
+            // 2.8.2: "Publish failed / Operation not permitted" = the key is dead; get a fresh one even right after a create
+            bool rejected = _engine?.PublishRejected == true;
+            if (!rejected && (DateTime.UtcNow - _goLiveCreatedUtc).TotalSeconds < 90) return null;   // we just created one: don't stack sessions on a fast retry loop
+            if (rejected) Log("⚠ EpikChat refused the stream key (Publish failed). Running Go live for a fresh key before retrying.");
+            var (ls, r) = await EnsureEpikLiveSession(run, epik, reconnect: true, freshKey: rejected);
             IReadOnlyDictionary<int, (string Url, string Secret)>? map = null;
             if (r is { Outcome: LiveSession.Outcome.Created, KeyChanged: true })
             {

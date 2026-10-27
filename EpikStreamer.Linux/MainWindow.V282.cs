@@ -6,7 +6,7 @@ namespace EpikStreamer;
 /// Ball Pit tab's mode (Ball Pit scene = mode Source) through <see cref="SourceMode"/>.</summary>
 public partial class MainWindow
 {
-    bool _srcSync;
+    bool _srcSync; System.Threading.Timer? _chatSizeSave;
     void Init282()
     {
         SrcKind.SelectionChanged += (_, _) => SrcKindChanged();

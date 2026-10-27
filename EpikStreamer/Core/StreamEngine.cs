@@ -349,6 +349,12 @@ public sealed class StreamEngine
     /// <summary>v2.4.1: awaited on the engine thread before each reconnect (after the backoff). May return replacement
     /// destination URLs (index → (url, secret)), e.g. when a new EpikChat live session issued a different key.</summary>
     public Func<Task<IReadOnlyDictionary<int, (string Url, string Secret)>?>>? BeforeReconnect { get; set; }
+    /// <summary>2.8.2: the RTMP server refused to let us publish (stale/expired stream key: "Operation not permitted",
+    /// "Publish failed", NetStream.Publish.BadName…). BeforeReconnect sees it and gets a fresh key through Go live instead of
+    /// retrying the same key. Cleared after each reconnect hook.</summary>
+    public bool PublishRejected { get; private set; }
+    static readonly Regex PublishRejectedRx = new(@"(Server error:\s*Publish failed|NetStream\.Publish\.(BadName|Rejected|Failed)|rtmps?://\S+:\s*Operation not permitted|Publish (rejected|failed))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    public static bool IsPublishRejected(string line) => PublishRejectedRx.IsMatch(line ?? "");
     public void ReplaceDestinations(IReadOnlyDictionary<int, (string Url, string Secret)> map)
     {
         lock (_lk)
@@ -435,6 +441,7 @@ public sealed class StreamEngine
                 if (attempt > _p.MaxRetries) { State?.Invoke($"Failed after {_p.MaxRetries} retries"); Emit("Giving up."); break; }
                 _reconnects++;
                 int delay = Math.Min(60, 2 << Math.Min(attempt - 1, 5)); // 2,4,8,16,32,60s
+                if (PublishRejected && BeforeReconnect != null) delay = 2;   // the same key won't start working: go get a new one now
                 Emit($"Reconnecting in {delay}s (attempt {attempt}/{_p.MaxRetries}), resuming item {_idx + 1} at {_pos:0}s…");
                 for (int i = 0; i < delay * 10 && !_stop; i++)
                 {
@@ -451,6 +458,7 @@ public sealed class StreamEngine
                         else if (t.Result is { } map) ReplaceDestinations(map);
                     }
                     catch (Exception ex) { Emit("Go-live check failed: " + ex.GetBaseException().Message); }
+                    PublishRejected = false;
                 }
             }
         }
@@ -623,6 +631,7 @@ public sealed class StreamEngine
             if (e.Data == null) return;
             if (ResumedLag.Match(e.Data) is { Success: true } lm) { _pace.OnLag(lm.Groups[1].Value, double.Parse(lm.Groups[2].Value, CultureInfo.InvariantCulture)); if (_pace.LagLines++ % 30 != 0) return; }   // keep the log readable
             Emit(e.Data);
+            if (!PublishRejected && IsPublishRejected(e.Data)) { PublishRejected = true; Emit("⚠ The streaming server refused the stream key (expired or already used). Getting a fresh key from EpikChat before retrying."); }
             if (!_encProgress && _encFatal == null && OptionError.IsMatch(e.Data)) _encFatal = e.Data.Trim();
             var m = SlaveFailed.Match(e.Data);
             if (m.Success && int.TryParse(m.Groups[1].Value, out var idx))

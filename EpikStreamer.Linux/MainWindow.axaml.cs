@@ -40,7 +40,8 @@ public partial class MainWindow : Window
         _store = ProfileStore.Load();
         UpdateUrlBox.Text = _store.UpdateManifestUrl; CheckOnStartupCheck.IsChecked = _store.CheckUpdatesOnStartup;
         GhTokenBox.Text = Secret.Unprotect(_store.ProtectedGitHubToken);
-        _chat.Compact = _store.ChatCompact;
+        _chat.Compact = _store.ChatCompact; _chat.SavedWidth = _store.ChatWidth; _chat.SavedHeight = _store.ChatHeight;
+        _chat.WindowSized += (w, h) => { _store.ChatWidth = w; _store.ChatHeight = h; _chatSizeSave?.Dispose(); _chatSizeSave = new System.Threading.Timer(_ => Avalonia.Threading.Dispatcher.UIThread.Post(() => { try { _store.Save(); } catch { } }), null, 1500, System.Threading.Timeout.Infinite); };
         _chat.StatusChanged += (v, live) => Dispatcher.UIThread.BeginInvoke(() => ShowChatStatus(v, live));
         Loaded += async (_, _) =>
         {

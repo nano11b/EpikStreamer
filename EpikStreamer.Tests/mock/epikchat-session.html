@@ -5,6 +5,9 @@
      and (ASSUMPTION, unverified on the real site) has a final "Done" button (VERIFIED in v2.7.1; no other confirm step).
      Query options: ?live=1 (already live), ?samekey=1 (session key = the saved FAKE key), ?noaria=1 (camera button has no
      aria-label/title, found by its video svg), ?plain=1 (no aria-label and no icon class, found by its green color).
+     2.8.2: ?mobile=1 (or a window narrower than 968 px, EpikChat's real breakpoint) = the narrow layout: the room rail is hidden
+     and the nav icons (incl. the camera) sit behind a collapsed "Open menu" button. ?stalekey=1 = live, but the session's key
+     was rotated: "Stream credentials" opens the encoder dialog with the current key.
      Exposes window.__mockIngest(key) = what the RTMP server would answer. FAKE keys only. -->
 <html><head><meta charset="utf-8"><title>mock chat</title><style>
 body{font-family:sans-serif;background:#111827;color:#ddd;margin:0}
@@ -13,14 +16,19 @@ header button{background:none;border:0;padding:6px;cursor:pointer}
 .green{color:rgb(16,185,129)} .blue{color:rgb(59,130,246)} .violet{color:rgb(167,139,250)}
 .fixed{position:fixed}.inset-0{inset:0}.z-50{z-index:50} [role=dialog]{background:#fff;color:#111;margin:40px auto;width:480px;padding:12px}
 button{padding:4px 8px;margin:2px}
+#menu{display:none} .chat-workspace-rail{display:block}
+@media (max-width:967px){ .chat-workspace-rail{display:none} #menu{display:inline-block} #glslot{display:none} body.menu-open #glslot{display:inline} }
+body.mobile .chat-workspace-rail{display:none} body.mobile #menu{display:inline-block} body.mobile #glslot{display:none} body.mobile.menu-open #glslot{display:inline}
 </style></head><body>
 <header id="nav">
+  <button type="button" id="menu" aria-label="Open menu" aria-expanded="false">☰</button>
   <a href="/chat" aria-label="EpikChat home"><svg width="28" height="28"><rect width="28" height="28" fill="#6366f1"/></svg></a>
   <button type="button" aria-label="Explore" class="blue"><svg class="lucide lucide-compass" width="22" height="22" stroke="currentColor" fill="none"><circle cx="11" cy="11" r="9"/></svg></button>
   <span id="glslot"></span>
   <button type="button" aria-label="Gifts" class="violet"><svg class="lucide lucide-gift" width="22" height="22" stroke="currentColor" fill="none"><rect x="3" y="8" width="16" height="12"/></svg></button>
   <button type="button" aria-label="User menu"><img alt="" width="26" height="26" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></button>
 </header>
+<nav class="chat-workspace-rail" aria-label="Rooms"><button type="button" aria-label="Lobby">L</button></nav>
 <main><div class="chat">CLUB DRAMA — chat messages… <button type="button">LIVE</button> <button type="button">Go live tips</button> <button type="button">Stream rules</button></div></main>
 <div role="dialog" aria-hidden="true" aria-label="Emoji picker" style="position:absolute;left:-9999px;width:300px;height:200px"><button type="button">Continue</button></div>
 <script>
@@ -103,6 +111,12 @@ window.__mockIngest = key => {
   else r = window.__live ? 'accepted (live)' : 'accepted';
   window.__ingest.push(r); return r;
 };
+if (Q.has('mobile')) document.body.classList.add('mobile');
+window.__menuClicks = 0;
+document.getElementById('menu').addEventListener('click', e => { window.__menuClicks++; later(() => { const o = document.body.classList.toggle('menu-open'); e.target.setAttribute('aria-expanded', String(o)); }); });
+if (Q.has('stalekey')) { window.__live = true; window.__session = { key: 'FAKE_rotated_Key_7777' }; }
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('button'); if (b && b.textContent === 'Stream credentials' && window.__session) { window.__credClicks = (window.__credClicks || 0) + 1;
+  later(() => { portal = document.createElement('div'); portal.className = 'fixed inset-0 z-50'; document.body.appendChild(portal); renderEncoder(); }); } });
 if (Q.has('live')) { window.__live = true; window.__session = { key: 'FAKE_mock_Key_12345abc' }; }
 renderNav();
 </script>

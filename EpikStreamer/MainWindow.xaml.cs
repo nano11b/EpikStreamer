@@ -557,7 +557,16 @@ public partial class MainWindow : Window
     async void ChatToggle_Click(object s, RoutedEventArgs e) => await ShowChat(ChatToggle.IsChecked == true);
     async Task ShowChat(bool on)
     {
-        ChatColumn.Width = on ? new GridLength(400) : new GridLength(0);
+        // 2.8.2: was a fixed 400 px column = EpikChat's mobile layout (no room list, no member list). Restore the remembered
+        // width (default 1000), widen the window to fit when the screen allows; the panel zooms out if it's still < 984 px.
+        var col = ChatLayout.Column(_store.ChatWidth);
+        if (on && WindowState == WindowState.Normal)
+        {
+            var need = 660 + col + 20; var max = SystemParameters.WorkArea.Width;
+            if (Width < need) { var w = Math.Min(need, max); Left = Math.Max(SystemParameters.WorkArea.Left, Math.Min(Left, SystemParameters.WorkArea.Right - w)); Width = w; }
+        }
+        ChatColumn.MinWidth = on ? ChatLayout.MinColumn : 0;
+        ChatColumn.Width = on ? new GridLength(col) : new GridLength(0);
         ChatHost.Visibility = ChatSplitter.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
         await _chat.SetActive(on);
         if (on) MaybeAskReplyPrompt();

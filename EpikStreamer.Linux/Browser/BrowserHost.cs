@@ -10,7 +10,7 @@ namespace EpikStreamer.Browser;
 /// Child process ("epikstreamer --browser-host"): runs GTK 3 + WebKitGTK 4.1 and speaks JSON lines on stdin/stdout.
 /// Kept out of the Avalonia process so the two toolkits never share a main loop, and so a WebKit crash can't take the stream down.
 /// All views share the default WebKitWebContext, i.e. one cookie jar / login session (like WebView2's shared user-data folder).
-///   in : {"op":"open","view":"chat","title":"…","w":420,"h":760}  navigate{view,url}  eval{view,id,js}  addScript{view,js}
+///   in : {"op":"open","view":"chat","title":"…","w":1300,"h":860,"minW":984,"minH":560}   out also: {"ev":"size","view","w","h"}  navigate{view,url}  eval{view,id,js}  addScript{view,js}
 ///        clearScripts{view}  show{view}  hide{view}  close{view}  clearData{id}  quit
 ///   out: {"ev":"ready","version":"2.44.0"}  loaded{view,url}  result{view,id,ok,value|error}  message{view,url,data}  closed{view}  log{text}
 /// </summary>
@@ -22,6 +22,8 @@ public static unsafe class BrowserHost
     [DllImport(Gtk)] static extern IntPtr gtk_window_new(int type);
     [DllImport(Gtk)] static extern void gtk_window_set_title(IntPtr w, string t);
     [DllImport(Gtk)] static extern void gtk_window_set_default_size(IntPtr w, int x, int y);
+    [DllImport(Gtk)] static extern void gtk_window_get_size(IntPtr w, out int x, out int y);
+    [DllImport(Gtk)] static extern void gtk_widget_set_size_request(IntPtr w, int x, int y);
     [DllImport(Gtk)] static extern void gtk_window_set_icon_from_file(IntPtr w, string path, IntPtr err);
     [DllImport(Gtk)] static extern void gtk_container_add(IntPtr c, IntPtr w);
     [DllImport(Gtk)] static extern void gtk_widget_show_all(IntPtr w);
@@ -77,10 +79,11 @@ public static unsafe class BrowserHost
     static readonly LoadFn OnLoad = OnLoadImpl;
     static readonly PolicyFn OnPolicy = OnPolicyImpl;
     static readonly DeleteFn OnDelete = OnDeleteImpl;
+    static readonly DeleteFn OnConfigure = OnConfigureImpl;
     static readonly AsyncFn OnEval = OnEvalImpl;
     static readonly AsyncFn OnCleared = (_, _, d) => Send(new JsonObject { ["ev"] = "result", ["id"] = (int)d, ["ok"] = true, ["value"] = "true" });
 
-    sealed class View { public string Id = ""; public IntPtr Win, Web, Ucm; }
+    sealed class View { public string Id = ""; public IntPtr Win, Web, Ucm; public int LastW, LastH; }
     static readonly Dictionary<string, View> Views = new();
     static readonly Dictionary<IntPtr, View> ByPtr = new();
     static readonly ConcurrentQueue<JsonObject> Inbox = new();
@@ -160,9 +163,11 @@ public static unsafe class BrowserHost
                     g_signal_connect_data(v.Web, "load-changed", Marshal.GetFunctionPointerForDelegate(OnLoad), IntPtr.Zero, IntPtr.Zero, 0);
                     g_signal_connect_data(v.Web, "decide-policy", Marshal.GetFunctionPointerForDelegate(OnPolicy), IntPtr.Zero, IntPtr.Zero, 0);
                     g_signal_connect_data(v.Win, "delete-event", Marshal.GetFunctionPointerForDelegate(OnDelete), IntPtr.Zero, IntPtr.Zero, 0);
+                    g_signal_connect_data(v.Win, "configure-event", Marshal.GetFunctionPointerForDelegate(OnConfigure), IntPtr.Zero, IntPtr.Zero, 0);
                     Views[vid] = v; ByPtr[v.Web] = v; ByPtr[v.Ucm] = v; ByPtr[v.Win] = v;
                     AddScript(v, Shim);
                 }
+                if (I(o, "minW", 0) > 0) gtk_widget_set_size_request(v.Web, I(o, "minW", 0), I(o, "minH", 400));   // 2.8.2: keep EpikChat's desktop layout
                 gtk_window_set_title(v.Win, S(o, "title", "EpikChat"));
                 if (o["show"]?.GetValue<bool>() != false) { gtk_widget_show_all(v.Win); gtk_window_present(v.Win); }
                 break;
@@ -224,6 +229,17 @@ public static unsafe class BrowserHost
         else if (uri.StartsWith("https://") || uri.StartsWith("http://"))
             try { Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { uri }, UseShellExecute = false }); } catch { }
         return 1;
+    }
+
+    /// <summary>2.8.2: report the window size (the app remembers it); only when it changed.</summary>
+    static int OnConfigureImpl(IntPtr win, IntPtr ev, IntPtr _)
+    {
+        if (ByPtr.TryGetValue(win, out var v))
+        {
+            gtk_window_get_size(win, out var w, out var h);
+            if (w != v.LastW || h != v.LastH) { v.LastW = w; v.LastH = h; Send(new JsonObject { ["ev"] = "size", ["view"] = v.Id, ["w"] = w, ["h"] = h }); }
+        }
+        return 0;   // let GTK handle it
     }
 
     static int OnDeleteImpl(IntPtr win, IntPtr ev, IntPtr _)

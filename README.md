@@ -49,6 +49,8 @@ Linux notes:
 - **Source / Playlist** tab → **Source**: *Playlist (video files)* or *Ball Pit scene*. With the Ball Pit scene you can press Start with an empty playlist: the scene is the picture and the audio is the radio (Radio tab), or silence if the radio is off. The choice is the same setting as the Ball Pit tab's mode (*Source*), so the two always agree.
 - In that mode Next does nothing, nothing shows as now playing, and `!request` goes to the radio's requests if they're enabled, otherwise viewers are told requests need a playlist.
 - The title bar shows the real version (it said 2.5.0).
+- The chat window opens wide enough for EpikChat's desktop layout (room list from 968 px, member list from 1280 px) and remembers its size; on Windows a narrow chat column zooms out instead. "Compact" no longer hides EpikChat's top bar or room list.
+- If EpikChat's server refuses the stream key (`Publish failed` / `Operation not permitted`), the app gets a fresh key through Go live before retrying.
 
 ## New in 2.8.0 — Engage (points, rewards, games, polls)
 Turn it on/off and configure everything on the **Engage** tab (per profile). Points are earned while you're live (watch time from the viewers list), for chatting (anti-spam), for chatting first and for daily streaks; they're stored per EpikChat user id in `engage/points.json` with daily backups. Replies use **↩ Reply in chat** (batched, ≤ 250 characters); cards are drawn on stream (into the Ball Pit when it's live).

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using EpikStreamer.Browser;
+using EpikStreamer.Core;
 namespace EpikStreamer;
 
 /// <summary>
@@ -69,7 +70,16 @@ public class ChatPanel
     }
     async Task<bool> ClickRoom(string name)
     {
-        try { return JsonSerializer.Deserialize<string>(await EvalJs("window.__epikSwitchRoom ? window.__epikSwitchRoom(" + JsonSerializer.Serialize(name) + ") : 'no-helper'")) == "clicked"; }
+        try
+        {
+            for (int i = 0; i < 3; i++)
+            {   // 2.8.2: "revealed" = the page was narrow and we opened its collapsed room list; give it a moment and look again
+                var r = JsonSerializer.Deserialize<string>(await EvalJs("window.__epikSwitchRoom ? window.__epikSwitchRoom(" + JsonSerializer.Serialize(name) + ") : 'no-helper'"));
+                if (r != "revealed") return r == "clicked";
+                await Task.Delay(700);
+            }
+            return false;
+        }
         catch { return false; }
     }
     /// <summary>Sanitized tap diagnostics: event names + field names/types only (no text, names, tokens or cookies).</summary>
@@ -84,6 +94,10 @@ public class ChatPanel
     BrowserClient? _b; bool _initialized, _wantVisible, _compact; string _url = "";
     public bool IsInitialized2 => _initialized;
     public bool IsLoaded2 => _initialized && _wantVisible && !WebViewHost.IsSignInOpen && _b is { HasExited: false };
+    /// <summary>2.8.2: remembered window size (0 = default); WindowSized fires (debounced by the caller) when the user resizes it.</summary>
+    public int SavedWidth { get; set; }
+    public int SavedHeight { get; set; }
+    public event Action<int, int>? WindowSized;
     public bool Compact { get => _compact; set { if (_compact == value) return; _compact = value; _ = ApplyCompact(); } }
 
     public ChatPanel() { WebViewHost.SignInActive += OnSignIn; InitFeed(); }
@@ -102,7 +116,9 @@ public class ChatPanel
                 _b.Message += OnMessage;
                 _b.Loaded += (v, u) => { if (v == View) _url = u; };
                 _b.Closed += v => { if (v == View && _wantVisible) { _wantVisible = false; _b.Navigate(View, "about:blank"); StatusChanged?.Invoke(null, false); UserClosed?.Invoke(); } };
-                _b.Open(View, "EpikChat — chat (EpikStreamer)", 440, 820);
+                _b.Resized += (v, w, h) => { if (v == View && w >= ChatLayout.MinW && h >= ChatLayout.MinH) WindowSized?.Invoke(w, h); };
+                var (cw, ch) = ChatLayout.Window(SavedWidth, SavedHeight);   // 2.8.2: wide enough for EpikChat's desktop layout (rooms + members)
+                _b.Open(View, "EpikChat — chat (EpikStreamer)", cw, ch, minW: ChatLayout.MinW, minH: ChatLayout.MinH);
                 RegisterScript();
                 _initialized = true;
             }

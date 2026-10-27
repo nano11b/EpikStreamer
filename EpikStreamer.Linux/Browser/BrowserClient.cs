@@ -81,6 +81,7 @@ public sealed class BrowserClient : IDisposable
                     case "loaded": Loaded?.Invoke(view, (string?)o["url"] ?? ""); break;
                     case "message": Message?.Invoke(view, (string?)o["url"] ?? "", (string?)o["data"] ?? "null"); break;
                     case "closed": Closed?.Invoke(view); break;
+                    case "size": Resized?.Invoke(view, (int?)o["w"] ?? 0, (int?)o["h"] ?? 0); break;
                     case "log": Log?.Invoke((string?)o["text"] ?? ""); break;
                 }
             }
@@ -90,8 +91,10 @@ public sealed class BrowserClient : IDisposable
 
     void Send(JsonObject o) { lock (_p) { if (!_p.HasExited) _p.StandardInput.WriteLine(o.ToJsonString()); } }
 
-    public void Open(string view, string title, int w = 1100, int h = 800, bool show = true) =>
-        Send(new JsonObject { ["op"] = "open", ["view"] = view, ["title"] = title, ["w"] = w, ["h"] = h, ["show"] = show });
+    public void Open(string view, string title, int w = 1100, int h = 800, bool show = true, int minW = 0, int minH = 0) =>
+        Send(new JsonObject { ["op"] = "open", ["view"] = view, ["title"] = title, ["w"] = w, ["h"] = h, ["show"] = show, ["minW"] = minW, ["minH"] = minH });
+    /// <summary>2.8.2: a view's window was resized (w, h in window pixels).</summary>
+    public event Action<string, int, int>? Resized;
     public void Navigate(string view, string url) => Send(new JsonObject { ["op"] = "navigate", ["view"] = view, ["url"] = url });
     public void AddScript(string view, string js) => Send(new JsonObject { ["op"] = "addScript", ["view"] = view, ["js"] = js });
     public void ClearScripts(string view) => Send(new JsonObject { ["op"] = "clearScripts", ["view"] = view });

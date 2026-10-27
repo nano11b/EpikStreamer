@@ -30,7 +30,7 @@ static class SelfTest
                 "--selftest-golive" => await GoLive(args[1]),
                 "--selftest-members" => await Members(args[1], args[2]),
                 "--selftest-tap" => await Tap(args[1], args[2]),
-                "--selftest-rooms" => await Rooms(args[1], args[2]),
+                "--selftest-rooms" => await Rooms(args[1], args[2], args.Length > 3 && args[3] == "mobile"),
                 "--selftest-engage" => await Engage(args[1], args[2]),
                 "--selftest-secret" => Secret_(),
                 "--selftest-pitonly" => PitOnly(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "epik-pitonly.flv")),
@@ -185,7 +185,7 @@ static class SelfTest
     /// background rooms ImpulsiveThots and "Drugs''R''Us" (sidebar shows Drugs'R'Us); each reply must be posted in its origin room
     /// via the composer, confirmed by the site's message(self) echo, and the active tab restored (or the tab the user clicked
     /// mid-reply kept).</summary>
-    static async Task<int> Rooms(string mockDir, string outFile)
+    static async Task<int> Rooms(string mockDir, string outFile, bool mobile = false)
     {
         var srv = new System.Diagnostics.Process { StartInfo = new("node", $"\"{Path.Combine(mockDir, "ws-server.js")}\" 0 120 rooms") { RedirectStandardOutput = true, UseShellExecute = false } };
         srv.Start();
@@ -196,7 +196,11 @@ static class SelfTest
                 .Replace("<script src=\"msgpack-mini.js\"></script>", "<script>" + File.ReadAllText(Path.Combine(mockDir, "msgpack-mini.js")) + "</script>")
                 .Replace("const t0 = Date.now();", "const t0 = Date.now(); window.__holdMs = 9000; window.__stepMs = 2500; window.__scenarioSteps = [5, 4];"
                     + " window.__onSent = (room, text) => { if (text.includes('(zoe)')) setTimeout(() => show('Music'), 30); };");   // the user clicks Music right after zoe's reply is posted
-            var f = Tmp("rooms.html", html);
+            if (mobile)   // 2.8.2: EpikChat's narrow layout: the room rail is a drawer behind "Open menu" that closes after a room is picked
+                html = html.Replace("</style>", " body:not(.open) .rail{display:none} </style>").Replace("<nav class=\"rail\"", "<button type=\"button\" id=\"menu\" aria-label=\"Open menu\" aria-expanded=\"false\">☰</button><nav class=\"rail\"")
+                    .Replace("const t0 = Date.now();", "const t0 = Date.now(); window.__menuClicks = 0; document.getElementById('menu').addEventListener('click', e => { window.__menuClicks++; setTimeout(() => { document.body.classList.add('open'); e.target.setAttribute('aria-expanded', 'true'); }, 150); });"
+                        + " document.getElementById('rail').addEventListener('click', () => setTimeout(() => { document.body.classList.remove('open'); document.getElementById('menu').setAttribute('aria-expanded', 'false'); }, 200));");
+            var f = Tmp(mobile ? "rooms-mobile.html" : "rooms.html", html);
             var chat = new ChatPanel { ChatUrl = "file://" + f + "#port=" + port + "&visible=Lobby", DebugMessages = true, SelfName = "", ReplyMinIntervalSeconds = 1 };
             var fs = JsonSerializer.Deserialize<ChatFeedSettings>("{\"CommandRoom\":\"\",\"DefaultsVersion\":271,\"AllowRoomSwitchToReply\":true,\"ViewersRestFallback\":false}")!;   // the reporter's saved settings
             chat.Feed.S = fs;
@@ -220,7 +224,7 @@ static class SelfTest
                 snap = new { page = JsonDocument.Parse(state).RootElement, received = received.ToList(), replies = new Dictionary<string, string>(replies), statuses = statuses.ToList(), queued = chat.QueuedReplies,
                     commandRoom = chat.Feed.TargetRoom, rooms = chat.Feed.RoomDiagnostics(), otherRoom = chat.Feed.OtherRoom };
             File.WriteAllText(outFile, JsonSerializer.Serialize(snap));
-            P($"  rooms selftest: {replies.Count} replies → {outFile}");
+            P($"  rooms selftest{(mobile ? " (narrow layout, menu opened " + await b.EvalAsync("chat", "window.__menuClicks") + "×)" : "")}: {replies.Count} replies → {outFile}");
             await chat.SetActive(false);
             return title.Contains("done") ? 0 : 1;
         }
@@ -404,6 +408,33 @@ static class SelfTest
             Check(r.Outcome == LiveSession.Outcome.Created && Ev("__creates") == "1", "camera found without aria-label " + q + " (" + r.Message + ")");
             await chat.SetActive(false);
         }
+        // ---- 2.8.2 ----
+        P("-- chat window gets EpikChat's desktop layout");
+        { var (chat, Ev) = await Open("");
+          var w = int.TryParse(Ev("window.innerWidth"), out var iw) ? iw : 0;
+          Check(w >= ChatLayout.RailMin && Ev("getComputedStyle(document.querySelector('.chat-workspace-rail')).display") != "\"none\"", $"chat view is {w} CSS px wide (≥ {ChatLayout.RailMin}: room rail shown, not the mobile layout)");
+          Check(Ev("getComputedStyle(document.getElementById('menu')).display") == "\"none\"", "no collapsed mobile menu at this width");
+          await chat.SetActive(false); }
+        P("-- narrow/mobile layout: camera behind a collapsed menu");
+        { var (chat, Ev) = await Open("?mobile=1"); var r = await Ls(chat).EnsureAsync("Public", Saved, 60);
+          Check(r.Outcome == LiveSession.Outcome.Created && Ev("__creates") == "1" && int.Parse(Ev("__menuClicks")) >= 1, "Go live opened the collapsed menu first, then created one session (" + r.Message + ")");
+          await chat.SetActive(false); }
+        P("-- key refused by the server, page offline → full Go live for a fresh key");
+        { var (chat, Ev) = await Open(""); var r = await Ls(chat).EnsureAsync("Public", Saved, 60, default, freshKey: true);
+          Check(r.Outcome == LiveSession.Outcome.Created && r.KeyChanged && r.Key != Saved && Ev("__creates") == "1", "new session, new key (" + r.Message + ")");
+          await chat.SetActive(false); }
+        P("-- key refused, page still live with a rotated key → read it from Stream credentials");
+        { var (chat, Ev) = await Open("?stalekey=1");
+          var r0 = await Ls(chat).EnsureAsync("Public", Saved, 20);
+          Check(r0.Outcome == LiveSession.Outcome.AlreadyLive, "without the refusal: already live, nothing clicked");
+          var r = await Ls(chat).EnsureAsync("Public", Saved, 30, default, freshKey: true);
+          Check(r.Outcome == LiveSession.Outcome.Created && r.KeyChanged && r.Key == "FAKE_rotated_Key_7777" && Ev("__creates") == "0" && Ev("window.__endClicks || 0") == "0", "current key read via \"Stream credentials\", no new session, never clicked End (" + r.Message + ")");
+          Check(Ev("__mockIngest('" + r.Key + "')").StartsWith("\"accepted"), "ingest accepts the key read from the page");
+          await chat.SetActive(false); }
+        P("-- key refused, page live with the same key → clear failure, nothing ended");
+        { var (chat, Ev) = await Open("?live=1"); var r = await Ls(chat).EnsureAsync("Public", "FAKE_mock_Key_12345abc", 20, default, freshKey: true);
+          Check(r.Outcome == LiveSession.Outcome.Failed && r.Message.Contains("End the live stream") && Ev("window.__endClicks || 0") == "0" && Ev("__creates") == "0", "asks the user to end the stale session (" + r.Message + ")");
+          await chat.SetActive(false); }
         return fails;
     }
 
