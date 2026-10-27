@@ -41,7 +41,7 @@ public partial class MainWindow
         _v23Timer.Tick += (_, _) => { _viewers.Tick(DateTime.Now); RefreshViewers(); RefreshNowText(); };
         _v23Timer.Start();
         RefreshRequests();
-        Init25();
+        Init25(); Init26();
         Closed += (_, _) => { _scanCts?.Cancel(); try { _library.Save(); } catch { } };
     }
 

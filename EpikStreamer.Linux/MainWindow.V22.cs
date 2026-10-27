@@ -239,9 +239,11 @@ public partial class MainWindow
     {
         var c = _store.Chat;
         if (c.DebugLog) Log($"💬 [{m.Room}] {m.User}{(m.IsBot ? " (bot)" : "")}{(m.Self ? " (you)" : "")}: {m.Text}");
+        if (HandleRadioRequest(m)) return;   // v2.6: radio on + radio requests → AzuraCast
         if (HandleRequestCommand(m)) return;
         bool live = _engine?.IsRunning == true;
         var ctx = new ChatCommands.Context { Song = System.IO.Path.GetFileNameWithoutExtension(_lastStats?.ItemName ?? ""), Uptime = live ? _lastStats?.Uptime ?? TimeSpan.Zero : TimeSpan.Zero, Viewers = _lastViewers, Music = _engine?.CurrentMusic ?? "" };
+        RadioContext(ctx);
         var resp = HandleChatCommand(m, ctx);
         if (resp == null) return;
         Log($"💬 {m.User}: {m.Text} → {resp}");

@@ -600,6 +600,67 @@
       </TabItem>
 
       <!-- STATS / LOG -->
+      <!-- RADIO (v2.6) -->
+      <TabItem Header="Radio" x:Name="RadioTab">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="10">
+            <TextBlock TextWrapping="Wrap" Opacity="0.8" Text="Background music from an internet radio station (Icecast / Shoutcast / AzuraCast) in any mode, e.g. under the Ball Pit. Paste the station's .pls / .m3u / .m3u8 playlist URL or a direct stream URL. If the station drops, the stream keeps going with silence and the radio reconnects by itself."/>
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+              <CheckBox x:Name="RdEnable" Content="Play the radio" Click="RdCheck" VerticalAlignment="Center"/>
+              <TextBlock Text="URL" Margin="14,0,6,0" VerticalAlignment="Center"/><TextBox x:Name="RdUrl" Width="430" LostFocus="RdCheck"/>
+              <Button Content="Test" Click="RdTest_Click" Margin="8,0,0,0" Classes="secondary"/>
+              <Button Content="Save" Click="RdSave_Click" Margin="6,0,0,0" Classes="secondary"/>
+            </StackPanel>
+            <TextBlock x:Name="RdDetect" Opacity="0.7" Margin="0,4,0,0"/>
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+              <TextBlock Text="Volume" Width="55" VerticalAlignment="Center"/><Slider x:Name="RdVolume" Width="170" Minimum="0" Maximum="1.5" ValueChanged="RdSlider"/>
+              <TextBlock x:Name="RdVolText" Width="45" Margin="6,0,0,0" VerticalAlignment="Center"/>
+              <CheckBox x:Name="RdMute" Content="Mute" Click="RdMute_Click" VerticalAlignment="Center"/>
+              <CheckBox x:Name="RdDuck" Content="Duck under mic / video audio" Margin="14,0,0,0" Click="RdCheck" VerticalAlignment="Center" ToolTip.Tip="Uses the ducking threshold/ratio from the Audio tab"/>
+              <CheckBox x:Name="RdNorm" Content="Level it (loudnorm)" Margin="14,0,0,0" Click="RdCheck" VerticalAlignment="Center"/>
+              <CheckBox x:Name="RdHls" Content="Prefer HLS" Margin="14,0,0,0" Click="RdCheck" VerticalAlignment="Center" ToolTip.Tip="Default: the MP3/AAC stream, HLS as the fallback"/>
+            </StackPanel>
+            <TextBlock Text="Now playing (AzuraCast)" FontWeight="Bold" Margin="0,12,0,0"/>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <CheckBox x:Name="RdNp" Content="Read now playing" Click="RdCheck" VerticalAlignment="Center"/>
+              <CheckBox x:Name="RdCard" Content="On the now-playing card" Margin="14,0,0,0" Click="RdCheck" VerticalAlignment="Center" ToolTip.Tip="Overlays tab: the now-playing card must be on"/>
+              <CheckBox x:Name="RdPitCard" Content="Radio card in the Ball Pit" Margin="14,0,0,0" Click="RdCheck" VerticalAlignment="Center"/>
+              <CheckBox x:Name="RdListeners" Content="Listener count" Margin="14,0,0,0" Click="RdCheck" VerticalAlignment="Center"/>
+              <TextBlock Text="every" Margin="14,0,6,0" VerticalAlignment="Center"/><TextBox x:Name="RdPoll" Width="40" LostFocus="RdCheck"/><TextBlock Text="s" Margin="4,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <TextBlock Text="API base" Margin="0,0,6,0" VerticalAlignment="Center"/><TextBox x:Name="RdBase" Width="220" LostFocus="RdCheck" ToolTip.Tip="Blank = detect from the URL"/>
+              <TextBlock Text="Station" Margin="12,0,6,0" VerticalAlignment="Center"/><TextBox x:Name="RdCode" Width="100" LostFocus="RdCheck" ToolTip.Tip="Station shortcode; blank = detect from the URL"/>
+              <TextBlock Text="API key (optional)" Margin="12,0,6,0" VerticalAlignment="Center"/><TextBox x:Name="RdKey" Width="150" PasswordChar="•" ToolTip.Tip="Not needed for now playing or requests. Stored encrypted; sent as X-API-Key."/>
+              <Button Content="Clear key" Click="RdClearKey_Click" Margin="6,0,0,0" Classes="secondary"/>
+              <TextBlock x:Name="RdKeyState" Margin="8,0,0,0" Opacity="0.7" VerticalAlignment="Center"/>
+            </StackPanel>
+            <Border BorderThickness="1" BorderBrush="#33888888" CornerRadius="6" Padding="8" Margin="0,8,0,0">
+              <StackPanel Orientation="Horizontal">
+                <Image x:Name="RdArt" Width="72" Height="72"/>
+                <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                  <TextBlock x:Name="RdNowText" FontWeight="Bold" TextWrapping="Wrap"/>
+                  <TextBlock x:Name="RdNextText" Opacity="0.8" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                  <TextBlock x:Name="RdEngState" Opacity="0.7" Margin="0,4,0,0"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            <TextBlock Text="Chat" FontWeight="Bold" Margin="0,12,0,0"/>
+            <TextBlock TextWrapping="Wrap" Opacity="0.8" Text="While the radio is on, !song / !np answer with the radio track and !lastsong with the previous one: on stream, and in chat only if &quot;reply in chat&quot; is on (Chat tab). Placeholders: {radio} {last} {station} {user}."/>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0"><TextBlock Text="!song / !np" Width="90" VerticalAlignment="Center"/><TextBox x:Name="RdSongTpl" Width="380" LostFocus="RdCheck"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0"><TextBlock Text="!lastsong" Width="90" VerticalAlignment="Center"/><TextBox x:Name="RdLastTpl" Width="380" LostFocus="RdCheck"/></StackPanel>
+            <CheckBox x:Name="RdReq" Content="!request sends song requests to the station (per-user cooldown from the Requests tab)" Margin="0,6,0,0" Click="RdReq_Click"/>
+            <TextBlock TextWrapping="Wrap" Opacity="0.7" Text="AzuraCast limits requests per IP address, and every chat request comes from this computer, so the station may refuse requests that come in quick succession."/>
+            <TextBlock Text="Ball Pit" FontWeight="Bold" Margin="0,12,0,0"/>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <CheckBox x:Name="RdBeat" Content="Balls bounce to the music" Click="RdCheck" VerticalAlignment="Center"/>
+              <TextBlock Text="Strength" Margin="14,0,6,0" VerticalAlignment="Center"/><Slider x:Name="RdBeatStr" Width="150" Minimum="0.1" Maximum="1" ValueChanged="RdSlider"/>
+            </StackPanel>
+            <TextBox x:Name="RdStatus" IsReadOnly="True" TextWrapping="Wrap" MinHeight="80" Margin="0,12,0,0" FontFamily="DejaVu Sans Mono,Liberation Mono,monospace"/>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
       <TabItem Header="Stats / Log" x:Name="StatsTab">
         <Grid Margin="10">
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>

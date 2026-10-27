@@ -85,7 +85,7 @@ public partial class MainWindow : Window
         TxtCorner.SelectedItem = o.TextCorner; TxtBox.IsChecked = o.TextBackground; TxtTicker.IsChecked = o.Ticker; TxtSpeed.Text = o.TickerSpeed.ToString();
         FontPath.Text = o.FontFile;
         ClkEnable.IsChecked = o.ClockEnabled; ClkFormat.Text = o.ClockFormat; ClkSize.Text = o.ClockFontSize.ToString(); ClkCorner.SelectedItem = o.ClockCorner;
-        LoadAudio(p); LoadNowPlaying(p); LoadBallPit(p);
+        LoadAudio(p); LoadNowPlaying(p); LoadBallPit(p); LoadRadio(p);
         _loading = false;
     }
 
@@ -116,7 +116,7 @@ public partial class MainWindow : Window
         o.Ticker = TxtTicker.IsChecked == true; o.TickerSpeed = Int(TxtSpeed.Text, 120, 10, 5000); o.FontFile = FontPath.Text.Trim();
         o.ClockEnabled = ClkEnable.IsChecked == true; o.ClockFormat = ClkFormat.Text; o.ClockFontSize = Int(ClkSize.Text, 28, 6, 400);
         o.ClockCorner = (Corner)(ClkCorner.SelectedItem ?? Corner.TopLeft);
-        SaveAudio(p); SaveNowPlaying(p); if (_pit != null) SaveBallPit(p);
+        SaveAudio(p); SaveNowPlaying(p); if (_pit != null) SaveBallPit(p); if (_radio != null) SaveRadio(p);
     }
 
     void Persist()
@@ -335,10 +335,12 @@ public partial class MainWindow : Window
 
         var run = p.Clone(p.Name); // snapshot, so UI edits don't affect the running stream
         var chatCfg = _store.Chat;
+        var radioUrls = await RadioPrepare(run);
+        if (_engine?.IsRunning == true) return;
         try
         {
             _engine = new StreamEngine(run, ff, dests, secrets);
-            HookEngine23(_engine);
+            HookEngine23(_engine); HookEngine26(_engine, run, radioUrls);
             _engine.BallPit = run.BallPit.Active ? _pit?.Scene : null; _bpSeq = -1;
             _engine.TextOverlays = (chatCfg.CommandsEnabled && chatCfg.ShowOnStream) || chatCfg.AlertsEnabled;
             _engine.SetMusicMuted(_musicMuted); _engine.SetMicMuted(_micMuted); _engine.SetOverlaysHidden(_overlaysHidden);
