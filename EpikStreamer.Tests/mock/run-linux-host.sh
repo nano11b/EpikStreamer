@@ -62,3 +62,6 @@ check(S[1]['m1']=={'Name':'member001','Avatar':'https://cdn.example.test/avatars
 check(X['avatarIsPng'] and X['avatarBytes']>50,'FetchAvatarViaPage returns PNG bytes')
 print('MEMBERS BRIDGE PASSED' if fails==0 else f'{fails} FAILED'); sys.exit(1 if fails else 0)
 PY
+# v2.7 live feed (tap + observer + router) through the WebKitGTK host, with the fake local WebSocket server
+"$B" --selftest-tap . "$out/tap.json"
+python3 tap-check.py "$out/tap.json" --host

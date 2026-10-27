@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pending</title>
+<script src="chat-tap.js"></script>
+<style>body{font:14px sans-serif;margin:0} .pane{height:400px;overflow:auto}</style></head>
+<body>
+<!-- v2.7 tap mock: "site code" below talks to ws-server.js (inferred socket.io-style protocol — EpikChat's real one is
+     unverified). The UI shows Room B while the command room is Lobby; the "Viewing me" panel is never opened.
+     Timeline (page-driven): conn 1 steps 0-3 (backlog, viewers, live msgs in both rooms, join/leave, server drops socket),
+     reconnect, conn 2 steps 0-1 (history replay + duplicate), UI switches to Lobby, steps 2-3 (msg seen by DOM + tap, join). -->
+<header>
+  <div role="heading" aria-level="1" id="roomTitle">Room B</div>
+  <button aria-label="Account menu" aria-haspopup="menu" data-account-button>MeStreamer</button>
+</header>
+<nav><a href="#" id="navLobby">Lobby</a> <a href="#" id="navB">Room B</a></nav>
+<main>
+  <div id="paneWrapA" aria-hidden="true" style="display:none">
+    <div data-chat-message-viewport><div role="log" aria-label="Chat messages" data-virtuoso-scroller="true" class="pane">
+      <div data-viewport-type="element"><div data-testid="virtuoso-item-list" id="list-r1"></div></div></div></div>
+  </div>
+  <div id="paneWrapB" aria-hidden="false">
+    <div data-chat-message-viewport><div role="log" aria-label="Chat messages" data-virtuoso-scroller="true" class="pane">
+      <div data-viewport-type="element"><div data-testid="virtuoso-item-list" id="list-r2"></div></div></div></div>
+  </div>
+  <form id="composerForm"><input data-chat-composer-input aria-label="Chat message" type="text" maxlength="250" placeholder="Message"></form>
+</main>
+<script>
+const t0 = Date.now();
+window.__all = []; const rec = (src, m) => window.__all.push({ t: Date.now() - t0, src, m });
+window.__epikTap = m => rec('dom', m); window.__epikTapSink = m => rec('tap', m);
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+const rowHtml = m => `<div data-chat-message-row="${m.id}" id="chat-message-${m.id}" class="row"><button aria-label="Open ${esc(m.user.username)}"><img alt="" src="data:,"></button>
+  <div data-chat-message-layout><div><button>${esc(m.user.username)}</button><span data-chat-sender-tags>${m.isBot ? '<span data-chat-tag="bot">BOT</span>' : ''}</span><time datetime="${m.createdAt}">now</time></div><div>${esc(m.content)}</div></div></div>`;
+let visible = 'r2', idx = 0; const cache = { r1: new Map(), r2: new Map() };
+function render(m) {
+  const rid = m.room.id; if (cache[rid].has(m.id)) return; cache[rid].set(m.id, m);   // keyed like React: re-sent ids don't re-render
+  if (rid !== visible) return;
+  const w = document.createElement('div'); w.setAttribute('data-index', idx++); w.innerHTML = rowHtml(m); document.getElementById('list-' + rid).appendChild(w);
+}
+function show(rid) {   // the user opens a room: its pane becomes visible with the cached messages (backlog for the observer)
+  visible = rid; const list = document.getElementById('list-' + rid); list.innerHTML = '';
+  for (const m of cache[rid].values()) { const w = document.createElement('div'); w.setAttribute('data-index', idx++); w.innerHTML = rowHtml(m); list.appendChild(w); }
+  document.getElementById('paneWrapA').style.display = rid === 'r1' ? '' : 'none'; document.getElementById('paneWrapA').setAttribute('aria-hidden', rid === 'r1' ? 'false' : 'true');
+  document.getElementById('paneWrapB').style.display = rid === 'r2' ? '' : 'none'; document.getElementById('paneWrapB').setAttribute('aria-hidden', rid === 'r2' ? 'false' : 'true');
+  document.getElementById('roomTitle').textContent = rid === 'r1' ? 'Lobby' : 'Room B';
+}
+document.getElementById('navLobby').addEventListener('click', e => { e.preventDefault(); show('r1'); });
+document.getElementById('navB').addEventListener('click', e => { e.preventDefault(); show('r2'); });
+const sent = [];
+const input = document.querySelector('[data-chat-composer-input]'); let state = '';
+input.addEventListener('input', e => { state = e.target.value; });
+document.getElementById('composerForm').addEventListener('submit', e => { e.preventDefault(); if (!state) return; sent.push([document.getElementById('roomTitle').textContent, state]); state = ''; input.value = ''; });
+const port = +(/port=(\d+)/.exec(location.hash + location.search) || [0, 0])[1];
+let conns = 0, finished = false;
+function finish() { finished = true; setTimeout(() => { document.title = JSON.stringify({ done: true, conns, all: window.__all, sent, diag: window.__epikTapDiag ? window.__epikTapDiag() : null }); }, window.__holdMs || 2500); }
+function connect() {
+  const c = ++conns; const ws = new WebSocket('ws://127.0.0.1:' + port + '/socket.io/?EIO=4&transport=websocket');
+  let step = 0;
+  const next = () => { if (ws.readyState !== 1) return;
+    if (c === 2 && step === 2) show('r1');                               // UI switches to the command room before step 2
+    ws.send('42' + JSON.stringify(['step', step++]));
+    if (step <= 3) setTimeout(next, 900); else if (c === 2) setTimeout(finish, 600); };
+  ws.onmessage = e => {
+    const d = String(e.data);
+    if (d[0] === '0') { ws.send('40'); return; }
+    if (d.startsWith('40')) { setTimeout(next, 300); return; }
+    if (!d.startsWith('42')) return;
+    const [ev, p] = JSON.parse(d.slice(2));
+    if (ev === 'room:history') p.messages.forEach(m => render({ ...m, room: p.room }));
+    else if (ev === 'message:new') render(p);
+  };
+  ws.onclose = () => { if (!finished && c < 2) setTimeout(connect, 400); };
+}
+setTimeout(connect, 800);
+</script>
+<script src="chat-observer.js"></script>
+</body></html>

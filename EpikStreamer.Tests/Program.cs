@@ -11,6 +11,7 @@ var FF = Environment.GetEnvironmentVariable("FFMPEG") ?? "/usr/bin/ffmpeg";
 if (mode == "ballpit") return BallPitTests.Unit();
 if (mode == "radio") return RadioTests.Unit();
 if (mode == "feed") return FeedTests.Run();
+if (mode == "feedreplay") return FeedReplay.Run(args[1], args[2], args.Length > 3 ? args[3] : "");
 if (mode == "radio-live") return RadioTests.Live(FF, dir, Environment.GetEnvironmentVariable("RADIO_URL") ?? "https://radio.seven-labs.com/public/labsfm/playlist.pls", Environment.GetEnvironmentVariable("OUT") ?? dir);
 if (mode == "pace") return PaceTests.Run(FF, dir, Environment.GetEnvironmentVariable("PITMODE") ?? "Source", Environment.GetEnvironmentVariable("CARD") == "1", double.Parse(Environment.GetEnvironmentVariable("SECS") ?? "90", System.Globalization.CultureInfo.InvariantCulture), Environment.GetEnvironmentVariable("ENCODER") ?? "libx264", Environment.GetEnvironmentVariable("OUT") ?? $"{dir}/pace.mp4");
 if (mode == "radio-encode") return RadioTests.Encode(FF, dir, Environment.GetEnvironmentVariable("OUT") ?? $"{dir}/radio.mp4", Environment.GetEnvironmentVariable("RADIO_URL") ?? "mock",

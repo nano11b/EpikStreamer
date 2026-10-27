@@ -9,6 +9,7 @@ namespace EpikStreamer;
 ///   --selftest-host                 protocol round-trip (eval, addScript, message bridge)
 ///   --selftest-keyfetch DIR AUD     key-fetch automation against the mock go-live page (DIR = EpikStreamer.Tests/mock)
 ///   --selftest-chat DIR OUT.json    chat observer against the mock chat page; writes page results + C#-received messages
+///   --selftest-tap DIR OUT.json     v2.7 live feed: tap + observer + router against ws-server.js (UI on another room)
 ///   --selftest-secret               keyring/file secret store round-trip
 /// Only mock pages and fake keys are used.
 /// </summary>
@@ -28,6 +29,7 @@ static class SelfTest
                 "--selftest-chat" => await Chat(args[1], args[2]),
                 "--selftest-golive" => await GoLive(args[1]),
                 "--selftest-members" => await Members(args[1], args[2]),
+                "--selftest-tap" => await Tap(args[1], args[2]),
                 "--selftest-secret" => Secret_(),
                 _ => Usage(),
             };
@@ -124,6 +126,47 @@ static class SelfTest
         P($"  page title {t.Length} chars, C# received {recv.Count} chat messages, {statuses.Count} statuses, {viewers.Count} viewer snapshots → {outFile}");
         await chat.SetActive(false);
         return t.Length > 0 ? 0 : 1;
+    }
+
+
+    /// <summary>v2.7: the real ChatPanel (tap registered first, observer, ChatFeedRouter) against the tap mock page and the fake
+    /// local WebSocket server. Command room = Lobby while the UI shows Room B; the viewers panel is never opened. A reply sent
+    /// while Room B is visible must be queued and posted after the UI switches to Lobby.</summary>
+    static async Task<int> Tap(string mockDir, string outFile)
+    {
+        var srv = new System.Diagnostics.Process { StartInfo = new("node", $"\"{Path.Combine(mockDir, "ws-server.js")}\" 0 90") { RedirectStandardOutput = true, UseShellExecute = false } };
+        srv.Start();
+        try
+        {
+            var line = await srv.StandardOutput.ReadLineAsync() ?? ""; var port = Regex.Match(line, @"PORT (\d+)").Groups[1].Value;
+            var html = File.ReadAllText(Path.Combine(mockDir, "epikchat-tap.html")).Replace("<script src=\"chat-observer.js\"></script>", "").Replace("<script src=\"chat-tap.js\"></script>", "")
+                .Replace("const t0 = Date.now();", "const t0 = Date.now(); window.__holdMs = 4000;");
+            var f = Tmp("tap.html", html);
+            var received = new List<object>(); var viewers = new List<object>(); var statuses = new List<string>();
+            var chat = new ChatPanel { ChatUrl = "file://" + f + "#port=" + port, DebugMessages = true, SelfName = "" };
+            chat.Feed.S = new ChatFeedSettings { CommandRoom = "Lobby", ViewersRestFallback = false };
+            chat.MessageReceived += m => { lock (received) received.Add(new { user = m.User, text = m.Text, id = m.Id, room = m.Room, isBot = m.IsBot, self = m.Self }); };
+            chat.ViewersReceived += (src, n) => { lock (viewers) viewers.Add(new { source = src, names = n.ToList() }); };
+            chat.ObserverStatus += s => { lock (statuses) statuses.Add(s); };
+            await chat.SetActive(true);
+            var b = await Client();
+            string reply = "";
+            for (int i = 0; i < 40 && chat.Feed.VisibleRoom != "Room B"; i++) await Task.Delay(250);
+            reply = await chat.SendChat("Now playing: Test Song");          // command room Lobby is not visible → queued
+            string title = "";
+            for (int i = 0; i < 80 && !title.Contains("\\\"done\\\""); i++) { await Task.Delay(500); title = await b.EvalAsync("chat", "document.title"); }
+            var t = JsonSerializer.Deserialize<string>(title) ?? "";
+            await Task.Delay(1500);   // let the 1 s flush timer run
+            var tapDiag = await chat.TapDiagnostics();
+            object snap; lock (received) lock (viewers) lock (statuses)
+                snap = new { page = JsonDocument.Parse(t.StartsWith("{") ? t : "{}").RootElement, received = received.ToList(), viewers = viewers.ToList(), statuses = statuses.ToList(), reply, queued = chat.QueuedReplies,
+                    source = chat.Feed.SourceStatus(DateTime.Now), fromTap = chat.Feed.FromTap, fromDom = chat.Feed.FromDom, duplicates = chat.Feed.Duplicates, otherRoom = chat.Feed.OtherRoom, unmatched = chat.Feed.Unmatched, reconnects = chat.Feed.TapReconnects, tapDiag };
+            File.WriteAllText(outFile, JsonSerializer.Serialize(snap));
+            P($"  tap selftest: page {t.Length} chars, C# received {received.Count} messages, {viewers.Count} viewer snapshots, reply '{reply}' → {outFile}");
+            await chat.SetActive(false);
+            return t.StartsWith("{") ? 0 : 1;
+        }
+        finally { try { srv.Kill(true); } catch { } }
     }
 
     /// <summary>v2.5 Ball Pit: the member collector through the real ChatPanel/WebKitGTK host (virtualized list mock), plus the

@@ -71,3 +71,30 @@ static class FeedTests
         return fails;
     }
 }
+
+/// <summary>v2.7: replays a tap-mock page record (every DOM-observer and tap post, with page timestamps) through the real
+/// ChatFeedBridge + ChatFeedRouter, like ChatPanel does. usage: dotnet T feedreplay page.json out.json [commandRoom]</summary>
+static class FeedReplay
+{
+    public static int Run(string inFile, string outFile, string room)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(inFile));
+        var t0 = new DateTime(2026, 10, 27, 12, 0, 0);
+        var r = new ChatFeedRouter(new ChatFeedSettings { CommandRoom = room });
+        var msgs = new List<object>(); var views = new List<object>(); var status = new List<string>();
+        r.Message += m => msgs.Add(new { user = m.User, text = m.Text, id = m.Id, room = m.Room, isBot = m.IsBot, self = m.Self });
+        r.Viewers += (s, n) => views.Add(new { source = s, names = n.ToList() });
+        DateTime now = t0;
+        foreach (var x in doc.RootElement.GetProperty("all").EnumerateArray())
+        {
+            now = t0.AddMilliseconds(x.GetProperty("t").GetDouble());
+            r.Flush(now);
+            var m = x.GetProperty("m"); var type = m.TryGetProperty("type", out var tp) ? tp.GetString() ?? "" : "";
+            ChatFeedBridge.Handle(m, type, r, now, status.Add);
+        }
+        r.Flush(now.AddSeconds(5));
+        File.WriteAllText(outFile, System.Text.Json.JsonSerializer.Serialize(new { messages = msgs, viewers = views, status, source = r.SourceStatus(now), r.FromTap, r.FromDom, r.Duplicates, r.OtherRoom, r.Unmatched, r.TapReconnects }));
+        Console.WriteLine($"replayed → {outFile}: {msgs.Count} messages, {views.Count} viewer snapshots");
+        return 0;
+    }
+}
