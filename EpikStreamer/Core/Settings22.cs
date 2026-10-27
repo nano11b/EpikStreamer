@@ -58,6 +58,8 @@ public class ChatCommand
 public class ChatSettings
 {
     public bool CommandsEnabled { get; set; } = true;
+    /// <summary>v2.7: live feed (network tap), command room, reply routing.</summary>
+    public ChatFeedSettings Feed { get; set; } = new();
     /// <summary>Opt-in: type responses into EpikChat as you. OFF by default; responses otherwise only show on-stream.</summary>
     public bool ReplyInChat { get; set; }
     /// <summary>v2.4.1: before Start / reconnect / scheduled start, open "Go live" in the chat panel if no EpikChat live session exists.</summary>
