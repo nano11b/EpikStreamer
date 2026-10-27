@@ -1,10 +1,15 @@
-// EpikStreamer chat tap (v2.7.0). Injected at DOCUMENT START into EpikChat's normal /chat page, before the site's own code.
+// EpikStreamer chat tap (v2.7.1). Injected at DOCUMENT START into EpikChat's normal /chat page, before the site's own code.
 // PASSIVE and READ-ONLY: it wraps window.WebSocket / EventSource (and peeks at fetch/XHR responses) only to MIRROR incoming
 // frames to the app. It never sends, modifies, delays or drops anything the page sends or receives, and never opens its own
 // sockets. The one exception is the optional viewers fallback, which repeats (GET only, ≥15 s apart) a same-origin request
 // the page itself already made for its viewer list.
-// ⚠ PROTOCOL NOT VERIFIED: EpikChat's chat app bundle only loads after sign-in, so the frame format is unknown. The parser
-//   below is deliberately tolerant (socket.io/engine.io, Phoenix, Centrifugo, {type,data}/{event,payload}/{t,d}, batches) and
+// v2.7.1 — VERIFIED from a signed-in capture (2026-10-27): EpikChat uses ONE wss://ws.epikchat.com/chat socket, Engine.IO v4 +
+//   socket.io with the MSGPACK parser: every socket.io packet is one BINARY frame {type, data:[event, payload], nsp, id?}
+//   (0 CONNECT, 2 EVENT, 3 ACK); text frames are only engine.io open/ping/pong. Handled below in sioPacket(): "message"
+//   (chat), "connectionAccepted" (self + favorite rooms), ACKs (room lists, live-stream viewers). Outgoing frames are decoded
+//   (never modified) only to correlate ack ids with request event names; the CONNECT packet (it carries the auth token) is
+//   never decoded or inspected.
+// The older generic text parser stays as a fallback (unverified for EpikChat): it is deliberately tolerant (socket.io/engine.io, Phoenix, Centrifugo, {type,data}/{event,payload}/{t,d}, batches) and
 //   finds chat messages / viewer events by SHAPE. CFG.map can override event names and field paths without a new build, and
 //   __epikTapDiag() returns sanitized event names + field names (no values, no text, no tokens, no cookies).
 (() => {
@@ -178,6 +183,154 @@
   };
   const hostOf = u => { try { const x = new URL(u, location.href); return x.host + x.pathname.replace(/[0-9a-f]{8,}|\d{3,}/gi, ':id').slice(0, 60); } catch { return '?'; } };
 
+
+  // ---------- v2.7.1: msgpack + socket.io (EpikChat's verified framing) ----------
+  const mpDecode = u8 => {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); let o = 0;
+    const td = new TextDecoder('utf-8');
+    const str = n => { const v = td.decode(u8.subarray(o, o + n)); o += n; return v; };
+    const bin = n => { const v = u8.slice(o, o + n); o += n; return v; };
+    const arr = n => { const a = new Array(n); for (let i = 0; i < n; i++) a[i] = rd(); return a; };
+    const map = n => { const m = {}; for (let i = 0; i < n; i++) { const k = rd(); m[String(k)] = rd(); } return m; };
+    const ext = (n) => { const t = dv.getInt8(o); o++; const at = o; o += n;
+      if (t === -1) {   // timestamp → ms
+        if (n === 4) return dv.getUint32(at) * 1000;
+        if (n === 8) { const hi = dv.getUint32(at), lo = dv.getUint32(at + 4); const ns = Math.floor(hi / 4); const sec = (hi & 3) * 4294967296 + lo; return sec * 1000 + Math.floor(ns / 1e6); }
+        if (n === 12) { const ns = dv.getUint32(at); const sec = Number(dv.getBigInt64(at + 4)); return sec * 1000 + Math.floor(ns / 1e6); }
+      }
+      return { ext: t, size: n }; };
+    const rd = () => {
+      if (o >= u8.length) throw new Error('eof');
+      const b = u8[o++];
+      if (b <= 0x7f) return b; if (b >= 0xe0) return b - 256;
+      if ((b & 0xf0) === 0x80) return map(b & 15); if ((b & 0xf0) === 0x90) return arr(b & 15); if ((b & 0xe0) === 0xa0) return str(b & 31);
+      let v;
+      switch (b) {
+        case 0xc0: return null; case 0xc2: return false; case 0xc3: return true;
+        case 0xc4: v = u8[o]; o += 1; return bin(v); case 0xc5: v = dv.getUint16(o); o += 2; return bin(v); case 0xc6: v = dv.getUint32(o); o += 4; return bin(v);
+        case 0xc7: v = u8[o]; o += 1; return ext(v); case 0xc8: v = dv.getUint16(o); o += 2; return ext(v); case 0xc9: v = dv.getUint32(o); o += 4; return ext(v);
+        case 0xca: v = dv.getFloat32(o); o += 4; return v; case 0xcb: v = dv.getFloat64(o); o += 8; return v;
+        case 0xcc: v = u8[o]; o += 1; return v; case 0xcd: v = dv.getUint16(o); o += 2; return v; case 0xce: v = dv.getUint32(o); o += 4; return v;
+        case 0xcf: v = Number(dv.getBigUint64(o)); o += 8; return v;
+        case 0xd0: v = dv.getInt8(o); o += 1; return v; case 0xd1: v = dv.getInt16(o); o += 2; return v; case 0xd2: v = dv.getInt32(o); o += 4; return v;
+        case 0xd3: v = Number(dv.getBigInt64(o)); o += 8; return v;
+        case 0xd4: return ext(1); case 0xd5: return ext(2); case 0xd6: return ext(4); case 0xd7: return ext(8); case 0xd8: return ext(16);
+        case 0xd9: v = u8[o]; o += 1; return str(v); case 0xda: v = dv.getUint16(o); o += 2; return str(v); case 0xdb: v = dv.getUint32(o); o += 4; return str(v);
+        case 0xdc: v = dv.getUint16(o); o += 2; return arr(v); case 0xdd: v = dv.getUint32(o); o += 4; return arr(v);
+        case 0xde: v = dv.getUint16(o); o += 2; return map(v); case 0xdf: v = dv.getUint32(o); o += 4; return map(v);
+      }
+      throw new Error('bad byte');
+    };
+    return rd();
+  };
+  const sio = { acks: new Map(), ackQ: [], self: { id: '', name: '', display: '' }, botIds: new Set(), rooms: new Map(), out: {}, ackShapes: new Map(),
+    viewersRequest: '', viewersKey: '', perRoom: {}, packets: 0, outPackets: 0, decodeErrors: 0, viewerAcks: 0, roomsPosted: 0 };
+  const HEX24 = /^[0-9a-f]{24}$/i;
+  const roomName = id => sio.rooms.get(id) || '';
+  const mask = id => typeof id === 'string' && id.length > 8 ? id.slice(0, 4) + '…' + id.slice(-3) : '?';
+  // walk any payload for room records: {roomId|_id, name, type:"room"} or {_id, name} inside an array under a "...rooms" key
+  const learnRooms = (v) => {
+    const found = []; let n = 0;
+    const walk = (x, d, key) => {
+      if (d > 9 || ++n > 30000 || x == null || typeof x !== 'object') return;
+      if (Array.isArray(x)) { for (const y of x.slice(0, 3000)) walk(y, d + 1, key); return; }
+      const name = typeof x.name === 'string' ? x.name : (typeof x.roomName === 'string' ? x.roomName : '');
+      const id = typeof x.roomId === 'string' ? x.roomId : (typeof x._id === 'string' ? x._id : '');
+      const isRoom = x.type === 'room' || x.targetType === 'room' || typeof x.roomId === 'string' || /rooms?$/i.test(key || '');
+      if (name && id && HEX24.test(id) && isRoom && name.length <= 100) { if (sio.rooms.get(id) !== name) { sio.rooms.set(id, name); found.push({ id, name }); } }
+      for (const k of Object.keys(x).slice(0, 200)) { const y = x[k]; if (y && typeof y === 'object') walk(y, d + 1, k); }
+    };
+    try { walk(v, 0, ''); } catch { }
+    if (found.length && sio.rooms.size < 5000) { sio.roomsPosted += found.length; post({ type: 'epik-tap-rooms', rooms: found.slice(0, 2000) }); }
+  };
+  const lastViewers = { key: '' };
+  const viewerOf = v => isObj(v) ? { name: strOf(first(v, ['username', 'userName', 'displayName', 'name', 'nick'])) || nameOf(v.user), id: strOf(first(v, ['userId', '_id', 'id'])), picture: strOf(first(v, ['picture', 'avatar', 'avatarUrl', 'image'])), country: strOf(first(v, ['country', 'countryCode'])), since: first(v, ['joinedAt', 'since', 'startedAt', 'watchingSince', 'createdAt']) } : (typeof v === 'string' ? { name: v } : null);
+  const isViewersResult = r => isObj(r) && Array.isArray(r.viewers) && typeof r.broadcastId === 'string';
+  const onViewers = (r, via) => {
+    const vs = r.viewers.slice(0, 2000).map(viewerOf).filter(x => x && x.name);
+    const names = vs.map(x => x.name.slice(0, 40));
+    sio.viewerAcks++; st.viewerEv++; rest.lastWsViewerAt = Date.now();
+    const key = names.slice().sort().join('\n');
+    if (key === lastViewers.key && sio.viewerAcks > 1) return;   // unchanged poll
+    lastViewers.key = key;
+    post({ type: 'epik-tap-viewers', op: 'snapshot', names, via, details: vs.slice(0, 500).map(x => ({ name: x.name.slice(0, 40), picture: /^https:\/\//.test(x.picture) ? x.picture.slice(0, 300) : '', country: x.country.slice(0, 8) })) });
+  };
+  const onChat = (p, live) => {
+    if (!isObj(p) || typeof p._id !== 'string') return 'message-?';
+    if (!remember(p._id) || !live) return live ? 'dup' : 'history';
+    if (p.deleted) return 'deleted';
+    if (p.targetType && p.targetType !== 'room') return 'not-room';
+    if (p.messageType && p.messageType !== 'text') return 'embed';
+    const text = typeof p.content === 'string' ? p.content : ''; if (!text) return 'empty';
+    const rid = strOf(p.targetId); const rn = roomName(rid);
+    const k = rn || mask(rid); sio.perRoom[k] = (sio.perRoom[k] || 0) + 1;
+    const isBot = p.senderType === 'bot' || sio.botIds.has(p.senderId);
+    const self = !!sio.self.id && p.senderId === sio.self.id;
+    st.msgs++;
+    const t = typeof p.createdAt === 'number' ? new Date(p.createdAt).toISOString() : strOf(p.createdAt);
+    post({ type: 'epik-chat', source: 'tap', id: p._id, user: strOf(p.senderName).slice(0, 60), text: text.slice(0, 2000), time: t, room: rn, roomId: rid, isBot, self });
+    return isBot ? 'message(bot)' : (self ? 'message(self)' : 'message');
+  };
+  const sioPacket = (pkt, dir) => {
+    if (!isObj(pkt) || typeof pkt.type !== 'number') return;
+    if (pkt.type === 0 || pkt.type === 1) return;                 // CONNECT/DISCONNECT: never inspected (auth token lives here)
+    const id = typeof pkt.id === 'number' ? pkt.id : null;
+    if (dir === 'out') {
+      sio.outPackets++;
+      if (pkt.type === 2 && Array.isArray(pkt.data)) {
+        const name = strOf(pkt.data[0]).slice(0, 60) || '(none)';
+        sio.out[name] = (sio.out[name] || 0) + 1;
+        if (id != null) { sio.acks.set(id, name); sio.ackQ.push(id); if (sio.ackQ.length > 500) sio.acks.delete(sio.ackQ.shift()); }
+      }
+      return;
+    }
+    sio.packets++;
+    if (pkt.type === 2 && Array.isArray(pkt.data)) {
+      const ev = strOf(pkt.data[0]).slice(0, 60) || '(none)'; const p = pkt.data[1];
+      let kind = 'other';
+      if (ev === 'message') kind = onChat(p, true);
+      else if (ev === 'connectionAccepted') {
+        const u = isObj(p) && isObj(p.userData) ? p.userData : {};
+        sio.self = { id: strOf(u.userId), name: strOf(u.username), display: strOf(u.displayName) };
+        for (const b of [u.chatCommandsBotId, ...(Array.isArray(u.mutedBotIds) ? u.mutedBotIds : [])]) if (typeof b === 'string') sio.botIds.add(b);
+        post({ type: 'epik-tap-self', name: sio.self.name.slice(0, 60), display: sio.self.display.slice(0, 60) });
+        learnRooms(u.favorites ? { favorites: u.favorites } : p); kind = 'session';
+      }
+      else if (ev === 'userUpdate') kind = 'presence';
+      else if (isViewersResult(p)) { onViewers(p, 'event'); kind = 'viewers'; }
+      else learnRooms(p);
+      note('sio', ev, kind, p);
+      return;
+    }
+    if (pkt.type === 3) {
+      const req = (id != null && sio.acks.get(id)) || '(unknown request)';
+      if (id != null) sio.acks.delete(id);
+      const r = Array.isArray(pkt.data) ? pkt.data[0] : pkt.data;
+      let kind = 'ack';
+      if (isViewersResult(r)) { sio.viewersRequest = req; onViewers(r, 'ack'); kind = 'viewers'; }
+      else {
+        learnRooms(r);
+        // history in acks: remember message ids so a later re-send never fires
+        let n = 0; const walk = (x, d) => { if (d > 6 || ++n > 20000 || !x || typeof x !== 'object') return; if (Array.isArray(x)) { x.slice(0, 2000).forEach(y => walk(y, d + 1)); return; }
+          if (typeof x._id === 'string' && typeof x.content === 'string' && x.targetId) remember(x._id); for (const k in x) if (x[k] && typeof x[k] === 'object') walk(x[k], d + 1); };
+        walk(r, 0);
+      }
+      if (!sio.ackShapes.has(req) && sio.ackShapes.size < 60) sio.ackShapes.set(req, shape(r, 3));
+      note('ack', req, kind, undefined);
+    }
+  };
+  const handleBinary = (u8, dir) => {
+    if (dir === 'in') { st.frames++; st.lastFrameAt = Date.now(); }
+    let pkt; try { pkt = mpDecode(u8); } catch { sio.decodeErrors++; return; }
+    try { sioPacket(pkt, dir); } catch { st.errors++; }
+  };
+  const toU8 = (d, cb) => {
+    try {
+      if (d instanceof ArrayBuffer) return cb(new Uint8Array(d));
+      if (ArrayBuffer.isView(d)) return cb(new Uint8Array(d.buffer, d.byteOffset, d.byteLength));
+      if (typeof Blob !== 'undefined' && d instanceof Blob && d.size < 8e6) return d.arrayBuffer().then(b => cb(new Uint8Array(b)), () => { });
+    } catch { }
+  };
   // ---------- WebSocket wrapper (transparent subclass) ----------
   const NativeWS = window.WebSocket;
   if (NativeWS && !NativeWS.__epikWrapped) {
@@ -189,8 +342,19 @@
         try {
           super.addEventListener('open', () => { st.open++; post({ type: 'epik-tap-status', state: 'open', sockets: st.sockets }); });
           super.addEventListener('close', () => { st.open = Math.max(0, st.open - 1); post({ type: 'epik-tap-status', state: 'closed', sockets: st.sockets }); });
-          super.addEventListener('message', ev => { try { textOf(ev.data, s => handle('ws', s)); } catch { st.errors++; } });
+          let chain = Promise.resolve();   // keeps Blob frames in order
+          super.addEventListener('message', ev => { try {
+            const d = ev.data;
+            if (typeof d === 'string') { if (!/^[0-9]$/.test(d)) handle('ws', d); else { st.frames++; st.lastFrameAt = Date.now(); } return; }
+            st.binary++;
+            if (typeof Blob !== 'undefined' && d instanceof Blob) chain = chain.then(() => toU8(d, u => handleBinary(u, 'in'))).catch(() => { });
+            else toU8(d, u => handleBinary(u, 'in'));
+          } catch { st.errors++; } });
         } catch { }
+      }
+      send(data) {   // passive: decode a copy for ack correlation, then send the ORIGINAL data unchanged
+        try { if (typeof data !== 'string' && !(typeof Blob !== 'undefined' && data instanceof Blob)) toU8(data, u => handleBinary(u, 'out')); } catch { }
+        return super.send(data);
       }
     }
     TapWS.__epikWrapped = true;
@@ -265,8 +429,12 @@
 
   // ---------- diagnostics (sanitized) ----------
   window.__epikTapDiag = () => ({
-    verified: false,
-    note: 'EpikChat realtime protocol is inferred, not verified. Events/fields below are names and value types only.',
+    verified: true,
+    protocol: 'engine.io v4 + socket.io msgpack (binary frames); verified from a signed-in capture 2026-10-27',
+    note: 'Event names, field names and value types only; no message text, names, tokens or cookies. The CONNECT packet is never inspected.',
+    sio: { packetsIn: sio.packets, packetsOut: sio.outPackets, decodeErrors: sio.decodeErrors, selfKnown: !!sio.self.id, roomsKnown: sio.rooms.size, botIds: sio.botIds.size,
+      viewersRequest: sio.viewersRequest, viewerAcks: sio.viewerAcks, outgoingEvents: sio.out, messagesPerRoom: sio.perRoom, pendingAcks: sio.acks.size,
+      ackShapes: Object.fromEntries(sio.ackShapes) },
     installedAt: new Date(st.startedAt).toISOString(),
     stats: Object.assign({}, st, { hosts: st.hosts, lastFrameMsAgo: st.lastFrameAt ? Date.now() - st.lastFrameAt : null }),
     restFallback: { learned: !!rest.url, path: rest.url ? hostOf(rest.url) : '', polls: rest.polls, enabled: !!CFG.restPoll },
@@ -277,5 +445,7 @@
   // test hook for the node unit test
   window.__epikTapDecode = raw => decode(raw);
   window.__epikTapHandle = raw => handle('test', raw);
+  window.__epikTapBinary = (u8, dir) => handleBinary(u8, dir || 'in');
+  window.__epikMsgpack = u8 => mpDecode(u8);
   setInterval(() => { try { _post({ type: 'epik-tap-stats', stats: window.__epikTapStats() }); } catch { } }, 10000);
 })();
