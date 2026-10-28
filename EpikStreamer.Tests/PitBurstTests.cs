@@ -30,7 +30,9 @@ static class PitBurstTests
         if (!File.Exists(mp3)) RadioTests.Run(ff, "-hide_banner", "-y", "-f", "lavfi", "-i", "sine=f=330:d=30,volume=0.6", "-f", "lavfi", "-i", "sine=f=550:d=30,volume=0.3", "-filter_complex", "amix=inputs=2,aformat=channel_layouts=stereo", "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100", mp3);
         ms.Mp3 = File.ReadAllBytes(mp3);
         var p = new Profile { Name = "PitBurst", Encoder = Environment.GetEnvironmentVariable("ENCODER") ?? "libx264", MaxRetries = 5 };
-        p.Playlist.Clear(); SourceMode.Set(p.BallPit, SourceMode.BallPit); p.Audio.Normalize = "Off";
+        p.Playlist.Clear(); SourceMode.Set(p.BallPit, SourceMode.BallPit); p.BallPit.DefaultsVersion = 284;
+        if (Environment.GetEnvironmentVariable("BG") is { Length: > 0 } bg) p.BallPit.Background = bg;
+        if (Environment.GetEnvironmentVariable("QUALITY") is { Length: > 0 } ql) p.BallPit.Quality = ql; p.Audio.Normalize = "Off";
         p.Radio = new RadioSettings { Enabled = true, Url = ms.Base + "/public/test/playlist.pls", Volume = 0.9, BeatPulse = true };
         var rh = new RadioHost(p.Radio, Path.Combine(dir, "art")); rh.Apply(p.Radio); var urls = rh.ResolveAsync(default).Result;
         var cache = Path.Combine(dir, "avcache-" + Guid.NewGuid().ToString("N")[..6]);

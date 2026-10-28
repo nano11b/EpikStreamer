@@ -183,8 +183,14 @@ public sealed unsafe class BallPitRenderer : IDisposable
         if (Transparent) _c.Clear(SKColors.Transparent);
         else
         {
-            _c.Clear(Col(s.BackgroundColor, new SKColor(15, 23, 42)));
-            if (!string.IsNullOrWhiteSpace(s.BackgroundImage))
+            if (s.IsSpace)
+            {
+                // 2.8.4: cached deep-space sky (built once per size/seed off the frame path); a plain dark fill until it's ready
+                _sky = SpaceSky.Get(Width, Height, s.SkySeed);
+                if (_sky != null) _sky.Draw(_c, t, _q.SkyAnim); else _c.Clear(new SKColor(5, 7, 20));
+            }
+            else _c.Clear(Col(s.BackgroundColor, new SKColor(15, 23, 42)));
+            if (!s.IsSpace && !string.IsNullOrWhiteSpace(s.BackgroundImage))
             {
                 if (_bgPath != s.BackgroundImage) { _bgImg?.Dispose(); _bgImg = null; _bgPath = s.BackgroundImage; try { if (File.Exists(_bgPath)) _bgImg = SKBitmap.Decode(_bgPath); } catch { } }
                 if (_bgImg != null) { _fill.FilterQuality = SKFilterQuality.Medium; _c.DrawBitmap(_bgImg, new SKRect(0, 0, Width, Height), _fill); }
@@ -221,10 +227,15 @@ public sealed unsafe class BallPitRenderer : IDisposable
         (new(X0, 0, 0), new(-1, 0, 0), new Vector3[] { new(X0, 0, -Z0), new(X0, 0, Z0), new(X0, H0, Z0), new(X0, H0, -Z0) }),
     };
     static readonly Vector3[] FloorQ = { new(-X0, 0, -Z0), new(X0, 0, -Z0), new(X0, 0, Z0), new(-X0, 0, Z0) };
+    SpaceSky? _sky;
+    /// <summary>The sky drawn last frame (null = Classic, or still building).</summary>
+    public SpaceSky? Sky => _sky;
     void Room(BallPitSettings s)
     {
-        float X = X0, Z = Z0;
+        float X = X0, Z = Z0; bool space = s.IsSpace;
         var floor = Col(s.FloorColor, new SKColor(30, 41, 59)); var wall = Col(s.WallColor, new SKColor(38, 52, 74));
+        // Space: a dark glassy floor (the sky shows through faintly) and see-through walls with lit edges, so it still reads as a pit
+        if (space) { floor = new SKColor(14, 18, 40, 225); wall = new SKColor(60, 80, 140, 46); }
         Poly(FloorQ, floor, _fill);
         _stroke.StrokeWidth = 1; _stroke.Color = SKColors.White.WithAlpha(22);
         for (float x = -X; x <= X + 0.01f; x += 1) Line(new(x, 0, -Z), new(x, 0, Z), _stroke);
@@ -233,8 +244,8 @@ public sealed unsafe class BallPitRenderer : IDisposable
         {
             if (Vector3.Dot(n, _cam - p) <= 0) continue;   // the camera is outside this wall: cut away (near wall)
             float shade = 0.85f + 0.15f * Math.Abs(n.X);
-            Poly(q, new SKColor((byte)(wall.Red * shade), (byte)(wall.Green * shade), (byte)(wall.Blue * shade)), _fill);
-            _stroke.StrokeWidth = 2; _stroke.Color = SKColors.White.WithAlpha(40);
+            Poly(q, new SKColor((byte)(wall.Red * shade), (byte)(wall.Green * shade), (byte)(wall.Blue * shade), wall.Alpha), _fill);
+            _stroke.StrokeWidth = 2; _stroke.Color = space ? new SKColor(140, 170, 255, 90) : SKColors.White.WithAlpha(40);
             Line(q[0], q[1], _stroke); Line(q[2], q[3], _stroke); Line(q[0], q[3], _stroke); Line(q[1], q[2], _stroke);
         }
     }

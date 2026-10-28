@@ -22,11 +22,26 @@ public class BallPitSettings
     public int DefaultsVersion { get; set; }
     public bool Migrate()
     {
-        if (DefaultsVersion >= 283) return false;
-        if (MaxBalls == 200 || MaxBalls > BallPitScene.HardCap) MaxBalls = BallPitScene.DefaultMax;
-        if (string.IsNullOrEmpty(Quality)) Quality = "Medium";
-        DefaultsVersion = 283; return true;
+        if (DefaultsVersion >= 284) return false;
+        if (DefaultsVersion < 283)
+        {
+            if (MaxBalls == 200 || MaxBalls > BallPitScene.HardCap) MaxBalls = BallPitScene.DefaultMax;
+            if (string.IsNullOrEmpty(Quality)) Quality = "Medium";
+        }
+        // 2.8.4: Space is the new default look. Profiles that customised the classic background (colour, image, floor or
+        // wall colour) keep Classic; untouched defaults get Space.
+        if (Background is not ("Classic" or "Space")) Background = "Space";
+        if (!string.IsNullOrWhiteSpace(BackgroundImage) || !Same(BackgroundColor, "#0F172A") || !Same(FloorColor, "#1E293B") || !Same(WallColor, "#26344A"))
+            Background = "Classic";
+        DefaultsVersion = 284; return true;
     }
+    static bool Same(string? a, string b) => string.Equals((a ?? "").Trim(), b, StringComparison.OrdinalIgnoreCase);
+    /// <summary>2.8.4: Classic (flat colour / image + room) | Space (pre-rendered starfield, galaxies, nebulae). Source mode only:
+    /// Overlay mode stays transparent.</summary>
+    public string Background { get; set; } = "Space";
+    /// <summary>2.8.4: sky layout seed (Randomize picks a new one).</summary>
+    public int SkySeed { get; set; } = 2804;
+    public bool IsSpace => Background == "Space";
     public double BallSize { get; set; } = 0.6;        // radius in room units (room is 16 × 10)
     public double Gravity { get; set; } = 14;          // units/s²
     public double Bounciness { get; set; } = 0.6;      // restitution 0..0.95
@@ -70,19 +85,21 @@ public sealed class BallPitQuality
     public string Name = "Medium"; public double Scale = 0.75; public bool HalfRate, Shadows = true, Specular = true, Avatars = true;
     public int LabelLimit = 40;        // labels only while at most this many balls are on screen (0 = never)
     public int MaxParticles = 300; public double CapScale = 1; public int Level;
+    /// <summary>2.8.4 Space background animation: 0 = static, 1 = slow drift, 2 = drift + twinkle.</summary>
+    public int SkyAnim = 1;
     public static BallPitQuality Preset(string? name) => (name ?? "").ToLowerInvariant() switch
     {
-        "low" => new() { Name = "Low", Scale = 0.5, HalfRate = true, Shadows = false, Specular = false, Avatars = false, LabelLimit = 0, MaxParticles = 60 },
-        "high" => new() { Name = "High", Scale = 1.0, LabelLimit = 80, MaxParticles = 400 },
+        "low" => new() { Name = "Low", SkyAnim = 0, Scale = 0.5, HalfRate = true, Shadows = false, Specular = false, Avatars = false, LabelLimit = 0, MaxParticles = 60 },
+        "high" => new() { Name = "High", SkyAnim = 2, Scale = 1.0, LabelLimit = 80, MaxParticles = 400 },
         _ => new() { Name = "Medium" },
     };
     public const int MaxLevel = 4;
-    public static readonly string[] LevelNames = { "full", "no shadows/highlights", "+ no labels, fewer particles", "+ every 2nd frame drawn", "+ ball count halved" };
+    public static readonly string[] LevelNames = { "full", "no shadows/highlights/sky animation", "+ no labels, fewer particles", "+ every 2nd frame drawn", "+ ball count halved" };
     /// <summary>The preset degraded <paramref name="level"/> steps (0 = as set).</summary>
     public static BallPitQuality For(string? preset, int level)
     {
         var q = Preset(preset); q.Level = Math.Clamp(level, 0, MaxLevel);
-        if (q.Level >= 1) { q.Shadows = false; q.Specular = false; }
+        if (q.Level >= 1) { q.Shadows = false; q.Specular = false; q.SkyAnim = 0; }
         if (q.Level >= 2) { q.LabelLimit = 0; q.MaxParticles = Math.Min(q.MaxParticles, 60); }
         if (q.Level >= 3) q.HalfRate = true;
         if (q.Level >= 4) q.CapScale = 0.5;

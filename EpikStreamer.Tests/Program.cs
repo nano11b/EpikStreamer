@@ -12,6 +12,7 @@ if (mode == "ballpit") return BallPitTests.Unit();
 if (mode == "radio") return RadioTests.Unit();
 if (mode == "feed") return FeedTests.Run();
 if (mode == "pitonly") return PitOnlyTests.Unit();
+if (mode == "sky") return SkyTests.Run(args.Length > 1 ? args[1] : "");
 if (mode == "pitlimits") return PitLimitTests.Run();
 if (mode == "pitbench") return PitPerfTests.Bench(args.Length > 1 ? args[1] : "");
 if (mode == "pitburst") return PitBurstTests.Run(FF, dir, Environment.GetEnvironmentVariable("OUT") ?? $"{dir}/pit-burst.mp4");

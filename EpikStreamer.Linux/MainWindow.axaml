@@ -585,7 +585,7 @@
               <CheckBox x:Name="BpRoom" Content="Room" Click="BpCheck"/>
               <CheckBox x:Name="BpLabels" Content="Names" Margin="8,0,0,0" Click="BpCheck"/>
               <CheckBox x:Name="BpCount" Content="Count" Margin="8,0,0,0" Click="BpCheck"/>
-              <TextBlock Text="Background" Margin="12,0,6,0"/><TextBox x:Name="BpBg" Width="80" ToolTip.Tip="#RRGGBB (Source mode)"/>
+              <TextBlock Text="Background" Margin="12,0,6,0"/><ComboBox x:Name="BpSky" Width="90" SelectionChanged="BpChanged" ToolTip.Tip="Space: stars, galaxies and nebulae behind a glass pit (pre-rendered once; drifts on Medium, twinkles on High). Classic: the colour/image below. Source mode only; Overlay mode stays transparent."><ComboBoxItem Content="Space"/><ComboBoxItem Content="Classic"/></ComboBox><Button x:Name="BpSkyRandom" Content="🎲 Randomize" Margin="6,0,0,0" Padding="6,0" Click="BpRandomSky" ToolTip.Tip="A different sky (new seed)"/><TextBlock Text="Colour" Margin="12,0,6,0"/><TextBox x:Name="BpBg" Width="80" ToolTip.Tip="#RRGGBB (Classic background, Source mode)"/>
               <TextBlock Text="Floor" Margin="8,0,6,0"/><TextBox x:Name="BpFloor" Width="80"/>
               <TextBlock Text="Walls" Margin="8,0,6,0"/><TextBox x:Name="BpWall" Width="80"/>
             </StackPanel>

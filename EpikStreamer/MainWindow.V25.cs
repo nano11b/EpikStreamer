@@ -74,7 +74,7 @@ public partial class MainWindow
         var sc = _pit.Scene; var f = _engine?.IsRunning == true ? _engine.PitFeed : null; var c = _pit.Avatars;
         return System.Text.Json.JsonSerializer.Serialize(new
         {
-            mode = sc.Settings.Mode, quality = sc.Settings.Quality, maxBalls = sc.Settings.MaxBalls, cap = sc.Cap, spawnPerSecond = sc.Settings.SpawnPerSecond,
+            mode = sc.Settings.Mode, quality = sc.Settings.Quality, background = sc.Settings.Background, skySeed = sc.Settings.SkySeed, skyAnimation = sc.Quality.SkyAnim, skyBuilds = SpaceSky.Builds, maxBalls = sc.Settings.MaxBalls, cap = sc.Cap, spawnPerSecond = sc.Settings.SpawnPerSecond,
             balls = sc.Count, overflow = sc.Overflow, spawned = sc.Spawned, evicted = sc.Evicted, coalesced = sc.Coalesced, peopleSeen = _pit.Roster.Count,
             avatars = c == null ? null : new { cached = c.Count, kb = c.Bytes / 1024, maxKb = c.MaxBytes / 1024, loading = c.InFlight, loaded = c.Loaded, failed = c.Failed, evictions = c.Evictions },
             feed = f == null ? null : new { frameMsAvg = Math.Round(f.FrameMsAvg, 2), frameMsP95 = Math.Round(f.FrameMsP95, 2), frameMsMax = Math.Round(f.FrameMsMax, 2), renderFps = Math.Round(f.RenderFps, 1), level = f.Level, levelName = BallPitQuality.LevelNames[f.Level], levelChanges = f.LevelChanges, renderErrors = f.RenderErrors, written = f.Written, repeats = f.Repeats, skipped = f.Skipped, lagS = Math.Round(f.Lag, 3) },
@@ -123,6 +123,7 @@ public partial class MainWindow
         BpMax.Text = b.MaxBalls.ToString(); BpSize.Value = b.BallSize; BpGravity.Value = b.Gravity; BpBounce.Value = b.Bounciness; BpFriction.Value = b.Friction;
         BpPitch.Value = b.CameraPitch; BpZoom.Value = b.CameraZoom; BpYaw.Value = b.CameraYaw; BpOrbit.IsChecked = b.Orbit; BpOrbitSpeed.Text = b.OrbitSpeed.ToString(CultureInfo.InvariantCulture);
         BpRoom.IsChecked = b.ShowRoom; BpLabels.IsChecked = b.Labels; BpCount.IsChecked = b.ShowCount;
+        BpSky.SelectedIndex = b.IsSpace ? 0 : 1;
         BpBg.Text = b.BackgroundColor; BpFloor.Text = b.FloorColor; BpWall.Text = b.WallColor;
         BpJoin.IsChecked = b.JoinEvents; BpLeave.IsChecked = b.LeaveEvents; BpBubbles.IsChecked = b.ChatBubbles; BpCmds.IsChecked = b.Commands;
         BpShakeHost.IsChecked = b.ShakeHostOnly; BpShakeCd.Text = b.ShakeCooldownSeconds.ToString();
@@ -134,6 +135,7 @@ public partial class MainWindow
     {
         var b = p.BallPit;
         b.Mode = (BpMode.SelectedItem as ComboBoxItem)?.Tag as string ?? "Off";
+        b.Background = BpSky.SelectedIndex == 1 ? "Classic" : "Space";
         b.Quality = BpQuality.SelectedIndex switch { 0 => "Low", 2 => "High", _ => "Medium" };
         if (BpQuality.SelectedIndex != _bpQuality)   // picking a preset also picks its render size
         {
@@ -158,6 +160,13 @@ public partial class MainWindow
     void BpChanged(object s, SelectionChangedEventArgs e) => BpLive();
     void BpSlider(object s, RoutedPropertyChangedEventArgs<double> e) => BpLive();
     void BpCheck(object s, RoutedEventArgs e) => BpLive();
+    /// <summary>2.8.4: a new sky seed (the sky is rebuilt in the background; frames never wait for it).</summary>
+    void BpRandomSky(object s, RoutedEventArgs e)
+    {
+        if (_pit == null) return;
+        _cur.BallPit.SkySeed = Random.Shared.Next(1, int.MaxValue); if (BpSky.SelectedIndex != 0) BpSky.SelectedIndex = 0;
+        BpLive();
+    }
     void BpSave_Click(object s, RoutedEventArgs e)
     {
         SaveBallPit(_cur); Persist();

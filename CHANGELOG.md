@@ -321,4 +321,11 @@ Built against the protocol and page structure Sam captured from the signed-in si
 - Playlists, overlays (logo/text/clock), hardware encoders with auto-detect, auto-reconnect, stats/preview, profiles, EpikChat sign-in & stream-key helper.
 
 ## 1.0.0
-- First release: stream a single file to an RTMP server with ffmpeg.
+- First release: stream a single file to an RTMP server with ffmpeg.## [2.8.4] - 2026-10-27
+### Added
+- Ball Pit "Space" background: pre-rendered deep-space sky (gradient, Milky Way band, nebulae, 2–4 spiral/elliptical galaxies, layered coloured starfield, vignette). Built once per size/seed off the render thread, blitted per frame.
+- Quality: Low = static, Medium = slow drift, High = drift + twinkle; step-down level 1 disables sky animation.
+- Setting Background = Space/Classic (Space default for new/untouched installs; customised classic colours/image keep Classic), "Randomize" sky seed; persisted, in diagnostics (background, skySeed, skyAnimation, skyBuilds), in both apps.
+- Overlay (transparent) mode is unchanged: no sky.
+
+
