@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.8.4 — 2026-10-27
+### Added
+- Ball Pit "Space" background: pre-rendered deep-space sky (gradient, Milky Way band, nebulae, 2–4 spiral/elliptical galaxies, layered coloured starfield, vignette). Built once per size/seed off the render thread, blitted per frame.
+- Quality: Low = static, Medium = slow drift, High = drift + twinkle; step-down level 1 disables sky animation.
+- Setting Background = Space/Classic (Space default for new/untouched installs; customised classic colours/image keep Classic), "Randomize" sky seed; persisted, in diagnostics (background, skySeed, skyAnimation, skyBuilds), in both apps.
+- Overlay (transparent) mode is unchanged: no sky.
+
 ## 2.8.3 — 2026-10-27
 ### Fixed — a burst of joins in the Ball Pit took the stream down
 - **Root cause (thread dumps during the stall):** the renderer held the scene lock for the whole frame and shaded the balls with `Parallel.For` on the shared .NET thread pool. Every finished avatar download (also on the thread pool) then blocked on that lock to hand its texture over. A burst of ~50 joins started ~50 downloads at once, so ~30 pool threads sat waiting on the lock, and the `Parallel.For` the lock holder was waiting for could not get threads. Frames took seconds, the Ball Pit feed (the only picture input in Ball-Pit-only mode) stopped, ffmpeg produced no output for 13–21 s, and the ingest dropped the stream. The UI thread waited on the same lock, so the app looked frozen too. Two more paths could end the stream: the encoder-side auto-degrade restarted ffmpeg to change the render size, and any render exception silently ended the feed (then the 25 s watchdog killed the encoder).
@@ -321,11 +328,4 @@ Built against the protocol and page structure Sam captured from the signed-in si
 - Playlists, overlays (logo/text/clock), hardware encoders with auto-detect, auto-reconnect, stats/preview, profiles, EpikChat sign-in & stream-key helper.
 
 ## 1.0.0
-- First release: stream a single file to an RTMP server with ffmpeg.## [2.8.4] - 2026-10-27
-### Added
-- Ball Pit "Space" background: pre-rendered deep-space sky (gradient, Milky Way band, nebulae, 2–4 spiral/elliptical galaxies, layered coloured starfield, vignette). Built once per size/seed off the render thread, blitted per frame.
-- Quality: Low = static, Medium = slow drift, High = drift + twinkle; step-down level 1 disables sky animation.
-- Setting Background = Space/Classic (Space default for new/untouched installs; customised classic colours/image keep Classic), "Randomize" sky seed; persisted, in diagnostics (background, skySeed, skyAnimation, skyBuilds), in both apps.
-- Overlay (transparent) mode is unchanged: no sky.
-
-
+- First release: stream a single file to an RTMP server with ffmpeg.
